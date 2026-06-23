@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}巡检数据可视化{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-5">
+    <div>
+        <h1 class="mb-2">巡检数据可视化</h1>
+        <p class="text-muted">IT运维巡检记录管理与可视化分析</p>
+    </div>
+    {% if object_data %}
+    <div class="d-flex gap-2">
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" style="border-radius:8px; font-size:0.85rem;">&#8681; 导出</button>
+            <ul class="dropdown-menu dropdown-menu-end" style="border-radius:10px; border:1px solid var(--border); background:var(--bg-modal);">
+                <li><a class="dropdown-item" href="{{ url_for('main.export_html') }}" style="font-size:0.85rem;">导出 HTML</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('main.export_json') }}" style="font-size:0.85rem;">导出 JSON</a></li>
+            </ul>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% if object_data %}
+<div class="filter-section mb-3">
+    <div class="filter-label">位置</div>
+    <div class="filter-bar">
+        <button class="filter-btn active" data-filter="all" data-group="location">全部</button>
+        <button class="filter-btn" data-filter="机房A" data-group="location">机房A</button>
+        <button class="filter-btn" data-filter="机房B" data-group="location">机房B</button>
+        <button class="filter-btn" data-filter="数据中心" data-group="location">数据中心</button>
+        <button class="filter-btn" data-filter="其他" data-group="location">其他</button>
+    </div>
+</div>
+<div class="filter-section mb-4">
+    <div class="filter-label">类型</div>
+    <div class="filter-bar">
+        <button class="filter-btn type-btn active" data-filter="all" data-group="device_type">全部</button>
+        <button class="filter-btn type-btn" data-filter="服务器" data-group="device_type">服务器</button>
+        <button class="filter-btn type-btn" data-filter="网络设备" data-group="device_type">网络设备</button>
+        <button class="filter-btn type-btn" data-filter="存储" data-group="device_type">存储</button>
+        <button class="filter-btn type-btn" data-filter="UPS" data-group="device_type">UPS</button>
+        <button class="filter-btn type-btn" data-filter="空调" data-group="device_type">空调</button>
+    </div>
+</div>
+
+<div class="row" id="object-list">
+    {% for item in object_data %}
+    {% if item.latest_record %}
+    <div class="col-md-4 mb-4 object-item"
+         data-location="{{ item.object.location or '' }}"
+         data-device-type="{{ item.object.device_type or '' }}">
+        <a href="/object/{{ item.object.id }}" class="text-decoration-none" style="color: inherit;">
+            <div class="card film-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <h5 class="card-title" style="font-size: 1rem; gap: 0;">{{ item.object.name }}</h5>
+                        {% if item.latest_record.result == '正常' %}
+                        <span class="badge bg-success" style="font-size:0.75rem;">正常</span>
+                        {% elif item.latest_record.result == '异常' %}
+                        <span class="badge bg-danger" style="font-size:0.75rem;">异常</span>
+                        {% else %}
+                        <span class="badge bg-warning" style="font-size:0.75rem;">需关注</span>
+                        {% endif %}
+                    </div>
+                    <div class="film-meta">
+                        {% if item.object.location %}<span>{{ item.object.location }}</span>{% endif %}
+                        {% if item.object.device_type %}<span>{{ item.object.device_type }}</span>{% endif %}
+                        {% if item.latest_record.timestamp %}<span>{{ item.latest_record.timestamp.strftime('%Y.%m.%d') }}</span>{% endif %}
+                    </div>
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<div class="empty-filter" id="empty-filter" style="display: none;">
+    <div class="card">
+        <div class="card-body empty-state">
+            <div class="empty-icon">&#128269;</div>
+            <p>该分类下暂无巡检对象</p>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body empty-state">
+        <div class="empty-icon">&#128269;</div>
+        <p>暂无巡检数据</p>
+        <a href="{{ url_for('main.upload') }}" class="btn btn-primary mt-2" style="border-radius:10px;">上传截图识别</a>
+    </div>
+</div>
+{% endif %}
+
+<style>
+    .filter-section {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    .filter-label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        font-weight: 500;
+        min-width: 32px;
+    }
+    .filter-bar {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+    .filter-btn {
+        padding: 0.35rem 0.85rem;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .filter-btn:hover {
+        border-color: var(--border-hover);
+        color: var(--text-heading);
+    }
+    .filter-btn.active {
+        background: var(--primary-soft);
+        border-color: var(--primary-border);
+        color: var(--accent);
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var locationBtns = document.querySelectorAll('.filter-btn[data-group="location"]');
+    var typeBtns = document.querySelectorAll('.filter-btn[data-group="device_type"]');
+    var items = document.querySelectorAll('.object-item');
+    var emptyFilter = document.getElementById('empty-filter');
+    var objectList = document.getElementById('object-list');
+
+    var activeLocation = 'all';
+    var activeType = 'all';
+
+    function applyFilters() {
+        var visible = 0;
+        items.forEach(function(item) {
+            var loc = item.getAttribute('data-location');
+            var dtype = item.getAttribute('data-device-type');
+            var showLoc = activeLocation === 'all' || loc === activeLocation ||
+                (activeLocation === '其他' && loc !== '机房A' && loc !== '机房B' && loc !== '数据中心');
+            var showType = activeType === 'all' || dtype === activeType;
+            var show = showLoc && showType;
+            item.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        emptyFilter.style.display = visible === 0 ? '' : 'none';
+        objectList.style.display = visible === 0 ? 'none' : '';
+    }
+
+    locationBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            locationBtns.forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            activeLocation = btn.getAttribute('data-filter');
+            applyFilters();
+        });
+    });
+
+    typeBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            typeBtns.forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            activeType = btn.getAttribute('data-filter');
+            applyFilters();
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+
+{% block title %}{{ object.name }} - 巡检历史{% endblock %}
+
+{% block extra_css %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-1">
+    <a href="/" class="back-link">&larr; 返回首页</a>
+    <div class="export-group">
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" style="border-radius:8px; font-size:0.85rem;">&#8681; 导出全部</button>
+            <ul class="dropdown-menu dropdown-menu-end" style="border-radius:10px; border:1px solid var(--border); background:var(--bg-modal);">
+                <li><a class="dropdown-item" href="{{ url_for('main.export_html') }}" style="font-size:0.85rem;">导出 HTML</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('main.export_json') }}" style="font-size:0.85rem;">导出 JSON</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<h1 class="mt-3 mb-4">{{ object.name }}</h1>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">巡检对象信息</h5>
+                <div class="card-text" style="line-height: 2;">
+                    {% if object.location %}位置: {{ object.location }}{% endif %}<br>
+                    {% if object.device_type %}类型: {{ object.device_type }}{% endif %}<br>
+                    {% if object.description %}{{ object.description }}{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">巡检统计</h5>
+                {% if records %}
+                <div class="d-flex gap-4">
+                    <div>
+                        <div class="stat-big stat-accent">{{ total_records }}</div>
+                        <div class="stat-desc">巡检次数</div>
+                    </div>
+                    <div>
+                        <div class="stat-big stat-success">{{ normal_count }}</div>
+                        <div class="stat-desc">正常</div>
+                    </div>
+                    <div>
+                        <div class="stat-big stat-danger">{{ abnormal_count }}</div>
+                        <div class="stat-desc">异常</div>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-muted">暂无巡检数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">巡检结果趋势</h5>
+        <div class="chart-wrapper">
+            <div style="position: relative; height: 380px;">
+                <canvas id="resultChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title d-flex justify-content-between align-items-center">
+            <span>巡检历史记录</span>
+            <span class="badge" style="background:var(--primary-soft);color:var(--accent);font-size:0.75rem;" id="record-count"></span>
+        </h5>
+        <div id="record-list" class="mt-3"></div>
+    </div>
+</div>
+
+<style>
+    .back-link {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.85rem;
+        transition: color 0.2s;
+    }
+    .back-link:hover { color: var(--text-link); }
+    .export-group {
+        display: flex;
+        gap: 0.4rem;
+    }
+    .export-group .btn {
+        font-size: 0.78rem;
+        padding: 0.3rem 0.75rem;
+    }
+    .stat-big {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text-heading);
+    }
+    .stat-accent { color: var(--accent); }
+    .stat-success { color: #22c55e; }
+    .stat-danger { color: #ef4444; }
+    .stat-desc {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var root = document.documentElement;
+        function cv(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
+
+        var ctx = document.getElementById('resultChart').getContext('2d');
+        var datasets = [];
+        var colors = {
+            '正常': '#22c55e',
+            '异常': '#ef4444',
+            '需关注': '#f59e0b'
+        };
+
+        {% for result, data in result_timeline.items() %}
+            datasets.push({
+                label: '{{ result }}',
+                data: {{ data|tojson }},
+                borderColor: colors['{{ result }}'] || '#818cf8',
+                backgroundColor: (colors['{{ result }}'] || '#818cf8') + '15',
+                borderWidth: 2,
+                tension: 0.4,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                pointBackgroundColor: colors['{{ result }}'] || '#818cf8',
+                pointBorderColor: cv('--bg'),
+                pointBorderWidth: 2,
+                fill: false
+            });
+        {% endfor %}
+
+        var chart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: { unit: 'day', displayFormats: { day: 'yyyy.MM.dd' }, tooltipFormat: 'yyyy.MM.dd' },
+                        grid: { color: cv('--grid-line'), drawBorder: false },
+                        ticks: { color: cv('--text-dim'), font: { size: 11 }, callback: function(v) { var d = new Date(v); return d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0'); } },
+                        title: { display: true, text: '日期', color: cv('--text-dim'), font: { size: 11, weight: 500 } }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: 1,
+                        grid: { color: cv('--grid-line'), drawBorder: false },
+                        ticks: { color: cv('--text-dim'), font: { size: 11 }, callback: function(v) { return v === 1 ? '正常' : v === 0 ? '异常' : ''; } },
+                        title: { display: true, text: '状态', color: cv('--text-dim'), font: { size: 11, weight: 500 } }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        backgroundColor: cv('--chart-tooltip-bg'),
+                        borderColor: cv('--chart-tooltip-border'),
+                        borderWidth: 1,
+                        titleColor: cv('--text-heading'),
+                        bodyColor: cv('--chart-tooltip-text'),
+                        padding: 12,
+                        cornerRadius: 10,
+                        titleFont: { weight: 600 },
+                        callbacks: {
+                            title: function(items) {
+                                if (items.length) {
+                                    var d = new Date(items[0].parsed.x);
+                                    var y = d.getFullYear();
+                                    var m = String(d.getMonth() + 1).padStart(2, '0');
+                                    var day = String(d.getDate()).padStart(2, '0');
+                                    return y + '.' + m + '.' + day;
+                                }
+                                return '';
+                            },
+                            label: function(c) { return c.dataset.label + ': ' + c.raw.result + ' (巡检人: ' + c.raw.inspector + ')'; }
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            color: cv('--text-secondary'),
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            padding: 20,
+                            font: { size: 12 }
+                        }
+                    }
+                }
+            }
+        });
+
+        function updateChart() {
+            chart.options.scales.x.grid.color = cv('--grid-line');
+            chart.options.scales.x.ticks.color = cv('--text-dim');
+            chart.options.scales.x.title.color = cv('--text-dim');
+            chart.options.scales.y.grid.color = cv('--grid-line');
+            chart.options.scales.y.ticks.color = cv('--text-dim');
+            chart.options.scales.y.title.color = cv('--text-dim');
+            chart.options.plugins.tooltip.backgroundColor = cv('--chart-tooltip-bg');
+            chart.options.plugins.tooltip.borderColor = cv('--chart-tooltip-border');
+            chart.options.plugins.tooltip.titleColor = cv('--text-heading');
+            chart.options.plugins.tooltip.bodyColor = cv('--chart-tooltip-text');
+            chart.options.plugins.legend.labels.color = cv('--text-secondary');
+            chart.data.datasets.forEach(function(ds) { ds.pointBorderColor = cv('--bg'); });
+            chart.update('none');
+        }
+
+        new MutationObserver(updateChart).observe(root, { attributes: true, attributeFilter: ['data-resolved'] });
+
+        loadInspectionHistory();
+    });
+
+    function loadInspectionHistory() {
+        var objectId = {{ object.id }};
+        fetch('/api/inspection_history/' + objectId)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var el = document.getElementById('record-list');
+                var countEl = document.getElementById('record-count');
+                countEl.textContent = data.length + ' 条';
+                if (data.length === 0) {
+                    el.innerHTML = '<p class="text-muted" style="font-size:0.85rem;">暂无记录</p>';
+                    return;
+                }
+                var html = '<div style="max-height:400px;overflow-y:auto;">';
+                data.forEach(function(item) {
+                    var date = '未知';
+                    if (item.timestamp) {
+                        var d = new Date(item.timestamp);
+                        date = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
+                    }
+                    var badgeClass = item.result === '正常' ? 'bg-success' : item.result === '异常' ? 'bg-danger' : 'bg-warning';
+                    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);font-size:0.85rem;">' +
+                        '<div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">' +
+                        '<span style="color:var(--text-muted);white-space:nowrap;">' + date + '</span>' +
+                        '<span class="badge ' + badgeClass + '" style="font-size:0.75rem;">' + escHtml(item.result) + '</span>' +
+                        '<span style="color:var(--text-muted);white-space:nowrap;">' + escHtml(item.inspector) + '</span>' +
+                        (item.status_detail ? '<span style="color:var(--text-secondary);font-size:0.78rem;">' + escHtml(item.status_detail) + '</span>' : '') +
+                        '</div>' +
+                        '<button class="btn btn-sm btn-outline-danger" style="padding:0.15rem 0.5rem;font-size:0.78rem;" onclick="deleteRecord(' + item.id + ', this)">删除</button>' +
+                        '</div>';
+                });
+                html += '</div>';
+                el.innerHTML = html;
+            });
+    }
+
+    function deleteRecord(id, btn) {
+        if (!confirm('确定删除这条巡检记录？')) return;
+        btn.disabled = true;
+        btn.textContent = '...';
+        fetch('/api/inspection_history/delete/' + id, { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    location.reload();
+                } else {
+                    alert(data.error || '删除失败');
+                    btn.disabled = false;
+                    btn.textContent = '删除';
+                }
+            })
+            .catch(function() {
+                btn.disabled = false;
+                btn.textContent = '删除';
+            });
+    }
+
+    function escHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+</script>
+{% endblock %}

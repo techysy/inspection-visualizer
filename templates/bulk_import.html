@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}批量导入 - 巡检数据可视化{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">批量导入</h1>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">导入点位</h5>
+                <p class="card-text mb-3">粘贴 Markdown 表格或 CSV 数据，批量导入巡检点位</p>
+
+                <textarea id="points-text" class="import-textarea" rows="8" placeholder="粘贴数据，支持以下格式：&#10;&#10;Markdown 表格：&#10;| 名称 | 位置 | 设备类型 | 描述 |&#10;|------|------|----------|------|&#10;| 服务器A-01 | 机房A | 服务器 | Web服务器 |&#10;| 交换机B-02 | 机房B | 网络设备 | 核心交换机 |&#10;&#10;CSV 格式（逗号分隔）：&#10;服务器A-01,机房A,服务器,Web服务器&#10;交换机B-02,机房B,网络设备,核心交换机"></textarea>
+
+                <div class="mt-3 d-flex gap-2">
+                    <button id="btn-import-points" class="btn btn-primary">导入点位</button>
+                    <span id="points-status" class="import-status"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">导入人员</h5>
+                <p class="card-text mb-3">粘贴 Markdown 表格或 CSV 数据，批量导入巡检人员</p>
+
+                <textarea id="inspectors-text" class="import-textarea" rows="8" placeholder="粘贴数据，支持以下格式：&#10;&#10;Markdown 表格：&#10;| 姓名 | 班组 | 联系方式 |&#10;|------|------|----------|&#10;| 张三 | 运维A组 | 13800138000 |&#10;| 李四 | 运维B组 | lisi@example.com |&#10;&#10;CSV 格式（逗号分隔）：&#10;张三,运维A组,13800138000&#10;李四,运维B组,lisi@example.com"></textarea>
+
+                <div class="mt-3 d-flex gap-2">
+                    <button id="btn-import-inspectors" class="btn btn-primary">导入人员</button>
+                    <span id="inspectors-status" class="import-status"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-2">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">导入巡检记录</h5>
+                <p class="card-text mb-3">粘贴 Markdown 表格或 CSV 数据，批量导入巡检记录</p>
+
+                <textarea id="records-text" class="import-textarea" rows="10" placeholder="粘贴数据，支持以下格式：&#10;&#10;Markdown 表格：&#10;| 点位名称 | 巡检时间 | 结果 | 巡检人员 | 状态详情 | 备注 |&#10;|----------|----------|------|----------|----------|------|&#10;| 服务器A-01 | 2024-01-15 10:00 | 正常 | 张三 | CPU 30%, 内存 50% | 无 |&#10;| 交换机B-02 | 2024-01-15 11:00 | 异常 | 李四 | 端口告警 | 需检查 |&#10;&#10;CSV 格式（逗号分隔）：&#10;服务器A-01,2024-01-15 10:00,正常,张三,CPU 30%,无&#10;交换机B-02,2024-01-15 11:00,异常,李四,端口告警,需检查"></textarea>
+
+                <div class="mt-3 d-flex gap-2">
+                    <button id="btn-import-records" class="btn btn-primary">导入巡检记录</button>
+                    <span id="records-status" class="import-status"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    // 解析 Markdown 表格或 CSV
+    function parseData(text) {
+        if (!text.trim()) return [];
+
+        const lines = text.trim().split('\n');
+        const data = [];
+
+        // 检测是否为 Markdown 表格
+        const isMarkdown = lines.some(line => line.trim().startsWith('|'));
+
+        if (isMarkdown) {
+            // 解析 Markdown 表格
+            let headerFound = false;
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('|')) continue;
+
+                // 移除首尾的 |
+                const content = trimmed.slice(1, -1);
+                const cells = content.split('|').map(c => c.trim());
+
+                // 跳过分隔行（如 |---|---|）
+                if (cells.every(c => c.match(/^[-:]+$/))) continue;
+
+                // 第一行是标题行，跳过
+                if (!headerFound) {
+                    headerFound = true;
+                    continue;
+                }
+
+                data.push(cells);
+            }
+        } else {
+            // 解析 CSV
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                const cells = trimmed.split(',').map(c => c.trim());
+                data.push(cells);
+            }
+        }
+
+        return data;
+    }
+
+    // 导入点位
+    document.getElementById('btn-import-points').addEventListener('click', async () => {
+        const text = document.getElementById('points-text').value;
+        const status = document.getElementById('points-status');
+
+        const data = parseData(text);
+        if (data.length === 0) {
+            status.innerHTML = '<span style="color:var(--danger);">未识别到有效数据</span>';
+            return;
+        }
+
+        const points = data.map(row => ({
+            name: row[0] || '',
+            location: row[1] || '',
+            device_type: row[2] || '',
+            description: row[3] || ''
+        })).filter(p => p.name);
+
+        if (points.length === 0) {
+            status.innerHTML = '<span style="color:var(--danger);">点位名称不能为空</span>';
+            return;
+        }
+
+        status.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
+
+        try {
+            const resp = await fetch('/api/points/import', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({points})
+            });
+            const result = await resp.json();
+            if (result.error) {
+                status.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
+            } else {
+                status.innerHTML = '<span style="color:var(--success);">成功导入 ' + result.imported + ' 个点位</span>';
+            }
+        } catch(e) {
+            status.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>';
+        }
+    });
+
+    // 导入人员
+    document.getElementById('btn-import-inspectors').addEventListener('click', async () => {
+        const text = document.getElementById('inspectors-text').value;
+        const status = document.getElementById('inspectors-status');
+
+        const data = parseData(text);
+        if (data.length === 0) {
+            status.innerHTML = '<span style="color:var(--danger);">未识别到有效数据</span>';
+            return;
+        }
+
+        const inspectors = data.map(row => ({
+            name: row[0] || '',
+            team: row[1] || '',
+            contact: row[2] || ''
+        })).filter(i => i.name);
+
+        if (inspectors.length === 0) {
+            status.innerHTML = '<span style="color:var(--danger);">姓名不能为空</span>';
+            return;
+        }
+
+        status.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
+
+        try {
+            const resp = await fetch('/api/inspectors/import', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({inspectors})
+            });
+            const result = await resp.json();
+            if (result.error) {
+                status.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
+            } else {
+                status.innerHTML = '<span style="color:var(--success);">成功导入 ' + result.imported + ' 名人员</span>';
+            }
+        } catch(e) {
+            status.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>';
+        }
+    });
+
+    // 导入巡检记录
+    document.getElementById('btn-import-records').addEventListener('click', async () => {
+        const text = document.getElementById('records-text').value;
+        const status = document.getElementById('records-status');
+
+        const data = parseData(text);
+        if (data.length === 0) {
+            status.innerHTML = '<span style="color:var(--danger);">未识别到有效数据</span>';
+            return;
+        }
+
+        const records = data.map(row => ({
+            point_name: row[0] || '',
+            timestamp: row[1] || '',
+            result: row[2] || '正常',
+            inspector_name: row[3] || '',
+            status_detail: row[4] || '',
+            notes: row[5] || ''
+        })).filter(r => r.point_name);
+
+        if (records.length === 0) {
+            status.innerHTML = '<span style="color:var(--danger);">点位名称不能为空</span>';
+            return;
+        }
+
+        status.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
+
+        try {
+            const resp = await fetch('/api/records/import', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({records})
+            });
+            const result = await resp.json();
+            if (result.error) {
+                status.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
+            } else {
+                let msg = '成功导入 ' + result.imported + ' 条记录';
+                if (result.skipped > 0) msg += '，跳过 ' + result.skipped + ' 条';
+                status.innerHTML = '<span style="color:var(--success);">' + msg + '</span>';
+            }
+        } catch(e) {
+            status.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>';
+        }
+    });
+})();
+</script>
+
+<style>
+.import-textarea {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    color: var(--text);
+    font-size: 0.85rem;
+    font-family: 'Consolas', 'Monaco', monospace;
+    resize: vertical;
+    outline: none;
+}
+.import-textarea:focus {
+    border-color: var(--accent);
+}
+.import-status {
+    font-size: 0.85rem;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,15 @@
+# 核心依赖
+# Python 3.8+
+
+# 数据存储
+SQLAlchemy>=2.0.51
+
+# 前端和Web服务
+Flask==3.0.2
+Pillow>=10.0.0
+
+# OCR 识别
+rapidocr-onnxruntime>=1.2.0
+
+# 其他
+python-dotenv==1.0.0
