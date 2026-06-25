@@ -7,7 +7,7 @@ from pathlib import Path
 import json
 from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response
 from PIL import Image
-from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector
+from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector, ObjectMetric
 
 try:
     from rapidocr_onnxruntime import RapidOCR
@@ -35,8 +35,59 @@ RESULT_KEYWORDS = {
 }
 
 
+def _parse_status_to_metrics(status_detail):
+    """将 status_detail 字符串解析为结构化指标 dict"""
+    metrics = {}
+    if not status_detail:
+        return metrics
+    for part in re.split(r'[;；]\s*', status_detail):
+        m = re.match(r'^(.+?):\s*(.+)$', part.strip())
+        if m:
+            key = m.group(1).strip()
+            val = m.group(2).strip()
+            metrics[key] = val
+    return metrics
+
+
+def _extract_location_from_lines(lines):
+    """从行列表中提取位置信息"""
+    skip_words = ['监控点总数', '在线', '离线', '未检测', '监控点在线率', '默认区域设置', 'admin']
+    
+    # 优先从前面的行中提取位置（左上角区域）
+    for i, line in enumerate(lines[:5]):  # 只检查前5行
+        line = line.strip()
+        if not line or len(line) < 2:
+            continue
+        if any(sw in line for sw in skip_words):
+            continue
+        if re.match(r'^\d+$', line):  # 纯数字
+            continue
+        if re.match(r'^\d{1,3}\.\d{1,2}%$', line):  # 百分比
+            continue
+        # 可能是区域名称（放宽正则，允许空格和常见标点）
+        if re.match(r'^[\u4e00-\u9fa5a-zA-Z0-9\-_\s,，。、]{2,30}$', line):
+            return line
+    
+    # 如果前面没有找到，尝试所有行
+    for line in lines:
+        line = line.strip()
+        if not line or len(line) < 2:
+            continue
+        if any(sw in line for sw in skip_words):
+            continue
+        if re.match(r'^\d+$', line):  # 纯数字
+            continue
+        if re.match(r'^\d{1,3}\.\d{1,2}%$', line):  # 百分比
+            continue
+        # 可能是区域名称（放宽正则）
+        if re.match(r'^[\u4e00-\u9fa5a-zA-Z0-9\-_\s,，。、]{2,30}$', line):
+            return line
+    
+    return ''
+
+
 def parse_inspection_form(ocr_result):
-    """解析巡检表单 OCR 结果"""
+    """解析巡检表单/仪表盘 OCR 结果"""
     if not ocr_result:
         return []
 
@@ -46,6 +97,97 @@ def parse_inspection_form(ocr_result):
             text = item[1]
             lines.append(text)
 
+    all_text = '\n'.join(lines)
+
+    # 尝试解析仪表盘格式（监控系统截图）
+    dashboard_result = parse_dashboard_screenshot(all_text, lines)
+    if dashboard_result:
+        return [dashboard_result]
+
+    # 传统表单格式解析
+    return parse_traditional_form(lines)
+
+
+def parse_dashboard_screenshot(all_text, lines):
+    """解析监控系统仪表盘截图"""
+    region_name = ''
+    total = 0
+    online = 0
+    offline = 0
+    undetected = 0
+    online_rate = ''
+
+    # 识别"监控点总数"后面的大数字
+    total_match = re.search(r'监控点总数\s*(\d+)', all_text)
+    if total_match:
+        total = int(total_match.group(1))
+
+    # 识别"在线"数量（排除"离线"、"在线率"）
+    online_match = re.search(r'(?<!离)在线\s*(\d+)', all_text)
+    if online_match:
+        online = int(online_match.group(1))
+
+    # 识别"离线"数量
+    offline_match = re.search(r'离线\s*(\d+)', all_text)
+    if offline_match:
+        offline = int(offline_match.group(1))
+
+    # 识别"未检测"数量
+    undetected_match = re.search(r'未检测\s*(\d+)', all_text)
+    if undetected_match:
+        undetected = int(undetected_match.group(1))
+
+    # 识别在线率百分比
+    rate_match = re.search(r'(\d{1,3}\.\d{1,2})%', all_text)
+    if rate_match:
+        online_rate = rate_match.group(0)
+
+    # 识别区域名称
+    region_name = _extract_location_from_lines(lines)
+
+    # 必须至少识别到总数或在线数才算有效
+    if total == 0 and online == 0:
+        return None
+
+    # 构建状态详情
+    status_detail_parts = []
+    if total > 0:
+        status_detail_parts.append(f'监控点总数: {total}')
+    if online > 0:
+        status_detail_parts.append(f'在线: {online}')
+    if offline > 0:
+        status_detail_parts.append(f'离线: {offline}')
+    if undetected > 0:
+        status_detail_parts.append(f'未检测: {undetected}')
+    if online_rate:
+        status_detail_parts.append(f'在线率: {online_rate}')
+
+    # 判断整体状态
+    result = '正常'
+    if offline > 0:
+        result = '异常'
+    if online_rate:
+        rate_value = float(online_rate.replace('%', ''))
+        if rate_value < 90:
+            result = '异常'
+        elif rate_value < 95:
+            result = '需关注'
+
+    # 返回结果：区域名称作为location，point_name留空以便后续匹配
+    return {
+        'point_name': '',  # 留空，由保存逻辑匹配
+        'location': region_name,  # 区域名称作为位置
+        'result': result,
+        'status_detail': '; '.join(status_detail_parts),
+        'notes': '',
+        'inspector': '',
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'is_dashboard': True,  # 标记为仪表盘格式
+    }
+
+
+def parse_traditional_form(lines):
+    """解析传统表单格式（兼容原有逻辑）"""
     results = []
     pending_object = ''
     pending_result = ''
@@ -112,7 +254,7 @@ def parse_inspection_form(ocr_result):
         # 当收集到完整信息时，保存记录
         if pending_object and pending_result:
             results.append({
-                'object_name': pending_object,
+                'point_name': pending_object,
                 'result': pending_result,
                 'status_detail': pending_status,
                 'inspector': pending_inspector,
@@ -183,6 +325,13 @@ def object_detail(object_id):
                 'inspector': record.inspector.name if record.inspector else '未知',
             })
 
+        # 获取指标配置
+        object_metrics = session.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
+        metrics_config = [
+            {'id': m.id, 'key': m.key, 'name': m.name, 'unit': m.unit, 'show_in_chart': m.show_in_chart}
+            for m in object_metrics
+        ]
+
         return render_template(
             'object_detail.html',
             object=obj,
@@ -190,7 +339,8 @@ def object_detail(object_id):
             total_records=total_records,
             normal_count=normal_count,
             abnormal_count=abnormal_count,
-            result_timeline=result_timeline
+            result_timeline=result_timeline,
+            metrics_config=metrics_config
         )
     finally:
         session.close()
@@ -214,6 +364,7 @@ def api_inspection_history(object_id):
                 'timestamp': r.timestamp.isoformat(),
                 'result': r.result,
                 'status_detail': r.status_detail,
+                'metrics': json.loads(r.metrics) if r.metrics else {},
                 'notes': r.notes,
                 'inspector': r.inspector.name if r.inspector else '未知',
             }
@@ -354,6 +505,112 @@ def api_objects_list():
             }
             for o in objects
         ])
+    finally:
+        session.close()
+
+
+@main.route('/api/points/list')
+def api_points_list():
+    """巡检点列表 API（兼容前端旧接口，实际返回巡检对象）"""
+    session = SessionLocal()
+    try:
+        objects = session.query(InspectionObject).filter_by(status='active').all()
+        return jsonify([
+            {
+                'id': o.id,
+                'name': o.name,
+                'location': o.location,
+                'device_type': o.device_type,
+                'description': o.description
+            }
+            for o in objects
+        ])
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/<int:object_id>/metrics', methods=['GET'])
+def api_object_metrics_list(object_id):
+    """获取巡检对象的指标配置"""
+    session = SessionLocal()
+    try:
+        metrics = session.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
+        return jsonify([
+            {
+                'id': m.id,
+                'key': m.key,
+                'name': m.name,
+                'unit': m.unit,
+                'show_in_chart': m.show_in_chart,
+                'sort_order': m.sort_order,
+            }
+            for m in metrics
+        ])
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/<int:object_id>/metrics', methods=['POST'])
+def api_object_metrics_add(object_id):
+    """添加指标配置"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '无效数据'}), 400
+    key = data.get('key', '').strip()
+    name = data.get('name', '').strip()
+    unit = data.get('unit', '').strip()
+    show_in_chart = data.get('show_in_chart', True)
+    sort_order = data.get('sort_order', 0)
+    if not key or not name:
+        return jsonify({'error': 'key 和 name 不能为空'}), 400
+    session = SessionLocal()
+    try:
+        metric = ObjectMetric(
+            object_id=object_id, key=key, name=name,
+            unit=unit, show_in_chart=show_in_chart, sort_order=sort_order
+        )
+        session.add(metric)
+        session.commit()
+        return jsonify({'id': metric.id, 'key': metric.key, 'name': metric.name,
+                        'unit': metric.unit, 'show_in_chart': metric.show_in_chart})
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/<int:object_id>/metrics/<int:metric_id>', methods=['PUT'])
+def api_object_metrics_update(object_id, metric_id):
+    """更新指标配置"""
+    data = request.get_json()
+    session = SessionLocal()
+    try:
+        metric = session.query(ObjectMetric).filter_by(id=metric_id, object_id=object_id).first()
+        if not metric:
+            return jsonify({'error': '指标不存在'}), 404
+        if 'name' in data:
+            metric.name = data['name']
+        if 'unit' in data:
+            metric.unit = data['unit']
+        if 'show_in_chart' in data:
+            metric.show_in_chart = data['show_in_chart']
+        if 'sort_order' in data:
+            metric.sort_order = data['sort_order']
+        session.commit()
+        return jsonify({'ok': True})
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/<int:object_id>/metrics/<int:metric_id>', methods=['DELETE'])
+def api_object_metrics_delete(object_id, metric_id):
+    """删除指标配置"""
+    session = SessionLocal()
+    try:
+        metric = session.query(ObjectMetric).filter_by(id=metric_id, object_id=object_id).first()
+        if not metric:
+            return jsonify({'error': '指标不存在'}), 404
+        session.delete(metric)
+        session.commit()
+        return jsonify({'ok': True})
     finally:
         session.close()
 
@@ -557,12 +814,13 @@ def api_records_import():
     session = SessionLocal()
     imported = 0
     skipped = 0
+    created = 0
     try:
         all_objects = session.query(InspectionObject).filter_by(status='active').all()
         all_inspectors = session.query(Inspector).all()
 
         for item in records:
-            object_name = item.get('object_name', '').strip()
+            object_name = item.get('point_name', '').strip() or item.get('object_name', '').strip()
             timestamp_str = item.get('timestamp', '').strip()
             result = item.get('result', '正常').strip()
             inspector_name = item.get('inspector_name', '').strip()
@@ -576,8 +834,18 @@ def api_records_import():
             # 匹配巡检对象
             obj = _match_object(object_name, all_objects)
             if not obj:
-                skipped += 1
-                continue
+                # 自动创建新巡检对象
+                obj = InspectionObject(
+                    name=object_name,
+                    location=object_name,
+                    device_type='监控',
+                    description=f'批量导入 - {status_detail or ""}',
+                    status='active'
+                )
+                session.add(obj)
+                session.flush()
+                all_objects.append(obj)
+                created += 1
 
             # 匹配巡检人员
             inspector = None
@@ -598,10 +866,12 @@ def api_records_import():
                 timestamp = datetime.now()
 
             record = InspectionRecord(
+                point_id=obj.id,
                 object_id=obj.id,
                 inspector_id=inspector.id if inspector else None,
                 result=result,
                 status_detail=status_detail,
+                metrics=json.dumps(_parse_status_to_metrics(status_detail), ensure_ascii=False),
                 notes=notes,
                 timestamp=timestamp
             )
@@ -614,7 +884,7 @@ def api_records_import():
     finally:
         session.close()
 
-    return jsonify({'imported': imported, 'skipped': skipped})
+    return jsonify({'imported': imported, 'skipped': skipped, 'created': created})
 
 
 @main.route('/api/ocr', methods=['POST'])
@@ -657,27 +927,67 @@ def api_save():
     session = SessionLocal()
     saved = 0
     skipped = 0
+    created = 0
     try:
         all_objects = session.query(InspectionObject).filter_by(status='active').all()
         all_inspectors = session.query(Inspector).all()
 
         for item in items:
-            object_name = item.get('object_name', '').strip()
+            object_name = item.get('point_name', '').strip() or item.get('object_name', '').strip()
+            location = item.get('location', '').strip()
             result = item.get('result', '正常')
             status_detail = item.get('status_detail', '')
             notes = item.get('notes', '')
             inspector_name = item.get('inspector', '')
             timestamp_str = item.get('timestamp')
-
-            if not object_name:
-                skipped += 1
-                continue
+            is_dashboard = item.get('is_dashboard', False)
+            front_point_id = item.get('point_id')
 
             # 匹配巡检对象
-            obj = _match_object(object_name, all_objects)
+            obj = None
+
+            # 优先使用前端已选择的 point_id
+            if front_point_id:
+                try:
+                    obj = session.query(InspectionObject).get(int(front_point_id))
+                except (ValueError, TypeError):
+                    obj = None
+
+            # 如果有明确的对象名称，先按名称匹配
+            if not obj and object_name:
+                obj = _match_object(object_name, all_objects)
+            
+            # 仪表盘格式：优先按位置匹配
+            if not obj and is_dashboard and location:
+                obj = _match_object_by_location(location, all_objects)
+            
+            # 仪表盘格式：如果没有位置匹配，尝试匹配监控类型
+            if not obj and is_dashboard:
+                obj = _match_object_by_type('监控', all_objects)
+            
+            # 如果还是没有匹配，创建新对象
             if not obj:
-                skipped += 1
-                continue
+                if is_dashboard and location:
+                    obj_name = location
+                    obj_location = location
+                elif object_name:
+                    obj_name = object_name
+                    obj_location = location
+                else:
+                    skipped += 1
+                    continue
+                
+                obj = InspectionObject(
+                    name=obj_name,
+                    location=obj_location,
+                    device_type='监控',
+                    description=f'OCR自动创建 - {status_detail}',
+                    status='active'
+                )
+                session.add(obj)
+                session.flush()
+                all_objects.append(obj)
+                created += 1
 
             # 匹配巡检人员
             inspector = None
@@ -698,10 +1008,12 @@ def api_save():
                 timestamp = datetime.now()
 
             record = InspectionRecord(
+                point_id=obj.id,
                 object_id=obj.id,
                 inspector_id=inspector.id if inspector else None,
                 result=result,
                 status_detail=status_detail,
+                metrics=json.dumps(_parse_status_to_metrics(status_detail), ensure_ascii=False),
                 notes=notes,
                 timestamp=timestamp
             )
@@ -714,7 +1026,7 @@ def api_save():
     finally:
         session.close()
 
-    return jsonify({'saved': saved, 'skipped': skipped})
+    return jsonify({'saved': saved, 'skipped': skipped, 'created': created})
 
 
 def _match_object(name, all_objects):
@@ -743,6 +1055,53 @@ def _match_object(name, all_objects):
 
     if best and best_score >= 10:
         return best
+    return None
+
+
+def _match_object_by_location(location, all_objects):
+    """按位置匹配巡检对象"""
+    if not location:
+        return None
+    
+    location_lower = location.lower()
+    best = None
+    best_score = 0
+
+    for obj in all_objects:
+        score = 0
+        obj_location_lower = (obj.location or '').lower()
+        obj_name_lower = (obj.name or '').lower()
+
+        # 位置完全匹配
+        if obj_location_lower and obj_location_lower == location_lower:
+            score += 30
+        # 位置包含匹配
+        elif obj_location_lower and location_lower in obj_location_lower:
+            score += 20
+        elif obj_location_lower and obj_location_lower in location_lower:
+            score += 15
+        # 名称包含位置
+        elif obj_name_lower and location_lower in obj_name_lower:
+            score += 10
+
+        if score > best_score:
+            best_score = score
+            best = obj
+
+    if best and best_score >= 15:
+        return best
+    return None
+
+
+def _match_object_by_type(device_type, all_objects):
+    """按设备类型匹配巡检对象（返回第一个匹配的）"""
+    if not device_type:
+        return None
+    
+    type_lower = device_type.lower()
+    for obj in all_objects:
+        if (obj.device_type or '').lower() == type_lower:
+            return obj
     return None
 
 

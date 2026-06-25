@@ -235,7 +235,7 @@
             if (matchedPoint) {
                 pointBadge = `<span class="point-badge">${escHtml(matchedPoint.name)}</span>`;
             } else {
-                let opts = '<option value="">选择点位</option>';
+                let opts = '<option value="">选择位置</option>';
                 allPoints.forEach(p => {
                     opts += `<option value="${p.id}">${escHtml(p.name)} ${p.location ? '(' + escHtml(p.location) + ')' : ''}</option>`;
                 });
@@ -308,7 +308,8 @@
                 return;
             }
             let msg = `成功保存 ${data.saved} 条巡检记录`;
-            if (data.skipped > 0) msg += `，${data.skipped} 条未匹配到点位`;
+            if (data.created > 0) msg += `，自动创建 ${data.created} 个新位置`;
+            if (data.skipped > 0) msg += `，${data.skipped} 条未匹配到位置`;
             saveStatus.innerHTML = `<div class="alert alert-success">${msg}</div>`;
             btnSave.style.display = 'none';
         } catch(e) {

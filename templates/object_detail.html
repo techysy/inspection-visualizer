@@ -74,6 +74,19 @@
     </div>
 </div>
 
+{% if metrics_config %}
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">指标趋势</h5>
+        <div class="chart-wrapper">
+            <div style="position: relative; height: 350px;">
+                <canvas id="metricsChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="card mb-4">
     <div class="card-body">
         <h5 class="card-title d-flex justify-content-between align-items-center">
@@ -229,6 +242,8 @@
         loadInspectionHistory();
     });
 
+    var metricsConfig = {{ metrics_config|tojson }};
+
     function loadInspectionHistory() {
         var objectId = {{ object.id }};
         fetch('/api/inspection_history/' + objectId)
@@ -249,19 +264,115 @@
                         date = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
                     }
                     var badgeClass = item.result === '正常' ? 'bg-success' : item.result === '异常' ? 'bg-danger' : 'bg-warning';
+                    var metricsText = '';
+                    if (metricsConfig.length > 0 && item.metrics) {
+                        var parts = [];
+                        metricsConfig.forEach(function(mc) {
+                            var val = item.metrics[mc.name] || item.metrics[mc.key];
+                            if (val !== undefined && val !== null && val !== '') {
+                                parts.push(mc.name + ': ' + val + (mc.unit ? mc.unit : ''));
+                            }
+                        });
+                        if (parts.length > 0) metricsText = parts.join('; ');
+                    }
+                    var detailText = metricsText || item.status_detail || '';
                     html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);font-size:0.85rem;">' +
                         '<div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">' +
                         '<span style="color:var(--text-muted);white-space:nowrap;">' + date + '</span>' +
                         '<span class="badge ' + badgeClass + '" style="font-size:0.75rem;">' + escHtml(item.result) + '</span>' +
                         '<span style="color:var(--text-muted);white-space:nowrap;">' + escHtml(item.inspector) + '</span>' +
-                        (item.status_detail ? '<span style="color:var(--text-secondary);font-size:0.78rem;">' + escHtml(item.status_detail) + '</span>' : '') +
+                        (detailText ? '<span style="color:var(--text-secondary);font-size:0.78rem;">' + escHtml(detailText) + '</span>' : '') +
                         '</div>' +
                         '<button class="btn btn-sm btn-outline-danger" style="padding:0.15rem 0.5rem;font-size:0.78rem;" onclick="deleteRecord(' + item.id + ', this)">删除</button>' +
                         '</div>';
                 });
                 html += '</div>';
                 el.innerHTML = html;
+
+                renderMetricsChart(data);
             });
+    }
+
+    function renderMetricsChart(historyData) {
+        var canvas = document.getElementById('metricsChart');
+        if (!canvas) return;
+        var chartMetrics = metricsConfig.filter(function(m) { return m.show_in_chart; });
+        if (chartMetrics.length === 0) return;
+
+        var root = document.documentElement;
+        function cv(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
+        var palette = ['#6366f1','#22c55e','#ef4444','#f59e0b','#06b6d4','#ec4899'];
+
+        var labels = [];
+        var dataRev = historyData.slice().reverse();
+        dataRev.forEach(function(item) {
+            if (item.timestamp) {
+                var d = new Date(item.timestamp);
+                labels.push(d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0'));
+            } else {
+                labels.push('');
+            }
+        });
+
+        var datasets = chartMetrics.map(function(mc, idx) {
+            var values = dataRev.map(function(item) {
+                var m = item.metrics || {};
+                var val = m[mc.name] || m[mc.key];
+                if (val === undefined || val === null || val === '') return null;
+                return parseFloat(String(val).replace(/[^0-9.\-]/g, '')) || null;
+            });
+            return {
+                label: mc.name + (mc.unit ? ' (' + mc.unit + ')' : ''),
+                data: values,
+                borderColor: palette[idx % palette.length],
+                backgroundColor: palette[idx % palette.length] + '15',
+                borderWidth: 2,
+                tension: 0.4,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                pointBackgroundColor: palette[idx % palette.length],
+                pointBorderColor: cv('--bg'),
+                pointBorderWidth: 2,
+                fill: false,
+                spanGaps: true
+            };
+        });
+
+        new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { labels: labels, datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: {
+                        grid: { color: cv('--grid-line'), drawBorder: false },
+                        ticks: { color: cv('--text-dim'), font: { size: 11 }, maxRotation: 45 }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: cv('--grid-line'), drawBorder: false },
+                        ticks: { color: cv('--text-dim'), font: { size: 11 } }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { color: cv('--text-secondary'), usePointStyle: true, pointStyle: 'circle', padding: 16, font: { size: 12 } }
+                    },
+                    tooltip: {
+                        backgroundColor: cv('--chart-tooltip-bg'),
+                        borderColor: cv('--chart-tooltip-border'),
+                        borderWidth: 1,
+                        titleColor: cv('--text-heading'),
+                        bodyColor: cv('--chart-tooltip-text'),
+                        padding: 12,
+                        cornerRadius: 10
+                    }
+                }
+            }
+        });
     }
 
     function deleteRecord(id, btn) {

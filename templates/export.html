@@ -62,7 +62,7 @@ h1{color:var(--txh);font-weight:700;font-size:1.8rem;letter-spacing:-.03em;margi
 
 <div class="container">
     <h1>巡检报告</h1>
-    <div class="subtitle">共 {{ all_data|length }} 个点位 &middot; 导出于 {{ now.strftime('%Y.%m.%d') }}</div>
+    <div class="subtitle">共 {{ all_data|length }} 个位置 &middot; 导出于 {{ now.strftime('%Y.%m.%d') }}</div>
 
     {% for item in all_data %}
     {% set point = item.point %}

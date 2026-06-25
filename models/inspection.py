@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 import datetime
@@ -24,6 +24,22 @@ class InspectionObject(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     inspection_records = relationship('InspectionRecord', back_populates='inspection_object')
+    metrics = relationship('ObjectMetric', back_populates='inspection_object', cascade='all, delete-orphan')
+
+
+class ObjectMetric(Base):
+    """巡检对象的指标配置"""
+    __tablename__ = 'object_metrics'
+
+    id = Column(Integer, primary_key=True)
+    object_id = Column(Integer, ForeignKey('inspection_objects.id'), nullable=False)
+    key = Column(String(50), nullable=False)       # 指标键名，如 onlinerate
+    name = Column(String(50), nullable=False)      # 显示名称，如 在线率
+    unit = Column(String(20), default='')           # 单位，如 %
+    show_in_chart = Column(Boolean, default=True)   # 是否参与可视化
+    sort_order = Column(Integer, default=0)         # 排序
+
+    inspection_object = relationship('InspectionObject', back_populates='metrics')
 
 
 class InspectionRecord(Base):
@@ -31,10 +47,12 @@ class InspectionRecord(Base):
     __tablename__ = 'inspection_records'
 
     id = Column(Integer, primary_key=True)
+    point_id = Column(Integer, nullable=False, default=0)  # 兼容旧数据库，非ORM关系
     object_id = Column(Integer, ForeignKey('inspection_objects.id'), nullable=False)
     inspector_id = Column(Integer, ForeignKey('inspectors.id'))  # 巡检人员
     result = Column(String(20), nullable=False)  # 巡检结果：正常/异常/合格/不合格
     status_detail = Column(Text)  # 状态详情：设备运行状态、温度、负载等
+    metrics = Column(Text)  # JSON: 结构化指标值 {"onlinerate": "84.79", "online": "574", ...}
     notes = Column(Text)  # 备注/问题描述
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)  # 巡检时间
 
@@ -74,10 +92,12 @@ def init_db():
             'created_at': 'DATETIME',
         },
         'inspection_records': {
+            'point_id': 'INTEGER NOT NULL DEFAULT 0',
             'object_id': 'INTEGER NOT NULL',
             'inspector_id': 'INTEGER',
             'result': 'VARCHAR(20) NOT NULL DEFAULT \'正常\'',
             'status_detail': 'TEXT',
+            'metrics': 'TEXT',
             'notes': 'TEXT',
             'timestamp': 'DATETIME',
         },
@@ -86,6 +106,14 @@ def init_db():
             'team': 'VARCHAR(50)',
             'contact': 'VARCHAR(100)',
             'created_at': 'DATETIME',
+        },
+        'object_metrics': {
+            'object_id': 'INTEGER NOT NULL',
+            'key': 'VARCHAR(50) NOT NULL',
+            'name': 'VARCHAR(50) NOT NULL',
+            'unit': 'VARCHAR(20) DEFAULT \'\'',
+            'show_in_chart': 'BOOLEAN DEFAULT 1',
+            'sort_order': 'INTEGER DEFAULT 0',
         },
     }
 

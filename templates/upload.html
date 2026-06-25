@@ -167,12 +167,16 @@
     function matchPoint(item) {
         let best = null, bestScore = 0;
         const name = (item.point_name || '').toLowerCase();
+        const location = (item.location || '').toLowerCase();
         for (const p of allPoints) {
             let score = 0;
             const pointName = (p.name || '').toLowerCase();
-            const location = (p.location || '').toLowerCase();
+            const pLocation = (p.location || '').toLowerCase();
             if (pointName && name.includes(pointName)) score += 20;
-            if (location && name.includes(location)) score += 10;
+            if (location && pLocation && location === pLocation) score += 30;
+            else if (location && pLocation && location.includes(pLocation)) score += 20;
+            else if (location && pLocation && pLocation.includes(location)) score += 15;
+            if (location && pointName && location.includes(pointName)) score += 10;
             if (p.device_type) {
                 const dtype = p.device_type.toLowerCase();
                 if (name.includes(dtype)) score += 5;
@@ -210,9 +214,18 @@
             if (matchedPoint) {
                 pointBadge = `<span class="point-badge">${escHtml(matchedPoint.name)}</span>`;
             } else {
-                let opts = '<option value="">选择点位</option>';
-                allPoints.forEach(p => {
-                    opts += `<option value="${p.id}">${escHtml(p.name)} ${p.location ? '(' + escHtml(p.location) + ')' : ''}</option>`;
+                let opts = '<option value="">选择位置</option>';
+                const ocrLocation = (item.location || '').toLowerCase();
+                const sorted = [...allPoints].sort((a, b) => {
+                    const aLoc = (a.location || '').toLowerCase();
+                    const bLoc = (b.location || '').toLowerCase();
+                    if (ocrLocation && aLoc && ocrLocation.includes(aLoc)) return -1;
+                    if (ocrLocation && bLoc && ocrLocation.includes(bLoc)) return 1;
+                    return 0;
+                });
+                sorted.forEach(p => {
+                    const selected = ocrLocation && p.location && ocrLocation.includes((p.location || '').toLowerCase()) ? ' selected' : '';
+                    opts += `<option value="${p.id}"${selected}>${escHtml(p.name)} ${p.location ? '(' + escHtml(p.location) + ')' : ''}</option>`;
                 });
                 pointBadge = `<select class="point-select" onchange="currentItems[${i}].point_id=this.value||null; this.className=this.value?'point-select point-ok':'point-select point-err';">${opts}</select>`;
             }
@@ -283,7 +296,8 @@
                 return;
             }
             let msg = `成功保存 ${data.saved} 条巡检记录`;
-            if (data.skipped > 0) msg += `，${data.skipped} 条未匹配到点位`;
+            if (data.created > 0) msg += `，自动创建 ${data.created} 个新位置`;
+            if (data.skipped > 0) msg += `，${data.skipped} 条未匹配到位置`;
             saveStatus.innerHTML = `<div class="alert alert-success">${msg}</div>`;
             btnSave.style.display = 'none';
         } catch(e) {
