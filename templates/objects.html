@@ -41,11 +41,27 @@
 
 {% if objects %}
 <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">共 {{ objects|length }} 个巡检对象</div>
-<div class="store-grid">
-    {% for obj in objects %}
+
+{% set grouped = {} %}
+{% for obj in objects %}
+    {% set n = obj.name %}
+    {% if n not in grouped %}
+        {% set _ = grouped.update({n: []}) %}
+    {% endif %}
+    {% set _ = grouped[n].append(obj) %}
+{% endfor %}
+
+{% for name, items in grouped.items() %}
+<div class="object-group">
+    <div class="object-group-title">
+        <span>{{ name }}</span>
+        <span class="object-group-count">{{ items|length }}</span>
+    </div>
+    <div class="store-grid">
+    {% for obj in items %}
     <div class="store-card">
         <div class="store-card-header">
-            <div class="store-avatar" style="{% if obj.device_type == '服务器' %}background:linear-gradient(135deg, rgba(129,140,248,0.15), rgba(99,102,241,0.1));color:#6366f1;{% elif obj.device_type == '网络设备' %}background:linear-gradient(135deg, rgba(34,211,238,0.15), rgba(6,182,212,0.1));color:#06b6d4;{% elif obj.device_type == '存储' %}background:linear-gradient(135deg, rgba(52,211,153,0.15), rgba(16,185,129,0.1));color:#10b981;{% elif obj.device_type == 'UPS' %}background:linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1));color:#f59e0b;{% elif obj.device_type == '空调' %}background:linear-gradient(135deg, rgba(56,189,248,0.15), rgba(14,165,233,0.1));color:#0ea5e9;{% else %}background:linear-gradient(135deg, rgba(107,114,128,0.15), rgba(75,85,99,0.1));color:#6b7280;{% endif %}">{{ obj.name[0] }}</div>
+            <div class="store-avatar" style="{% if obj.device_type == '服务器' %}background:linear-gradient(135deg, rgba(129,140,248,0.15), rgba(99,102,241,0.1));color:#6366f1;{% elif obj.device_type == '网络设备' %}background:linear-gradient(135deg, rgba(34,211,238,0.15), rgba(6,182,212,0.1));color:#06b6d4;{% elif obj.device_type == '存储' %}background:linear-gradient(135deg, rgba(52,211,153,0.15), rgba(16,185,129,0.1));color:#10b981;{% elif obj.device_type == 'UPS' %}background:linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1));color:#f59e0b;{% elif obj.device_type == '空调' %}background:linear-gradient(135deg, rgba(56,189,248,0.15), rgba(14,165,233,0.1));color:#0ea5e9;{% elif obj.device_type == '车辆' %}background:linear-gradient(135deg, rgba(244,114,182,0.15), rgba(236,72,153,0.1));color:#ec4899;{% elif obj.device_type == '工牌' %}background:linear-gradient(135deg, rgba(168,85,247,0.15), rgba(139,92,246,0.1));color:#a855f7;{% else %}background:linear-gradient(135deg, rgba(107,114,128,0.15), rgba(75,85,99,0.1));color:#6b7280;{% endif %}">{{ obj.name[0] }}</div>
             <div class="store-info">
                 <div class="store-name">{{ obj.name }}</div>
                 <div style="display:flex;gap:0.3rem;flex-wrap:wrap;margin-top:0.25rem;">
@@ -54,6 +70,16 @@
                     {% if obj.status == 'inactive' %}<span class="film-tag" style="background:rgba(239,68,68,0.1);color:#ef4444;">停用</span>{% endif %}
                 </div>
             </div>
+            <form method="POST" action="{{ url_for('main.object_delete', object_id=obj.id) }}" class="d-inline" onsubmit="return confirm('确定删除巡检对象 {{ obj.name }}？关联的巡检记录也会删除。')">
+                <button type="submit" title="删除对象" class="clone-btn clone-btn-del">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+            </form>
+            <form method="POST" action="{{ url_for('main.object_clone', object_id=obj.id) }}" class="d-inline">
+                <button type="submit" title="复制对象" class="clone-btn">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+            </form>
         </div>
         {% if obj.created_at %}
         <div class="store-card-meta">
@@ -73,12 +99,6 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>
                 指标
             </button>
-            <form method="POST" action="{{ url_for('main.object_delete', object_id=obj.id) }}" class="d-inline" onsubmit="return confirm('确定删除巡检对象 {{ obj.name }}？关联的巡检记录也会删除。')">
-                <button type="submit" class="store-action-btn store-action-delete">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    删除
-                </button>
-            </form>
         </div>
         <div class="metrics-panel" id="metrics-panel-{{ obj.id }}" style="display:none;">
             <div style="border-top:1px solid var(--border);padding-top:0.75rem;margin-top:0.75rem;">
@@ -88,10 +108,11 @@
                         + 添加指标
                     </button>
                 </div>
-                <div class="metrics-add-row" id="metrics-add-{{ obj.id }}" style="display:none;margin-bottom:0.5rem;">
+                <div class="metrics-add-row" id="metrics-add-{{ obj.id }}" style="display:none;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.3rem;">
                     <input type="text" placeholder="名称(如在线率)" id="m-name-{{ obj.id }}" style="width:70px;font-size:0.75rem;padding:0.2rem 0.4rem;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text);">
                     <input type="text" placeholder="键(如onlinerate)" id="m-key-{{ obj.id }}" style="width:80px;font-size:0.75rem;padding:0.2rem 0.4rem;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text);">
                     <input type="text" placeholder="单位(%)" id="m-unit-{{ obj.id }}" style="width:40px;font-size:0.75rem;padding:0.2rem 0.4rem;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text);">
+                    <input type="number" placeholder="最大值" id="m-max-{{ obj.id }}" value="100" style="width:55px;font-size:0.75rem;padding:0.2rem 0.4rem;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text);">
                     <button onclick="addMetric({{ obj.id }})" style="font-size:0.75rem;padding:0.2rem 0.5rem;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;">确定</button>
                 </div>
                 <div id="metrics-list-{{ obj.id }}" style="font-size:0.78rem;color:var(--text-secondary);">加载中...</div>
@@ -121,7 +142,7 @@
                                 <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">类型</label>
                                 <select class="form-select" name="device_type" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
                                     <option value="">-</option>
-                                    {% for dtype in ['服务器', '网络设备', '存储', 'UPS', '空调', '监控', '其他'] %}
+            {% for dtype in ['服务器', '网络设备', '存储', 'UPS', '空调', '监控', '车辆', '工牌', '其他'] %}
                                     <option value="{{ dtype }}" {% if obj.device_type == dtype %}selected{% endif %}>{{ dtype }}</option>
                                     {% endfor %}
                                 </select>
@@ -138,6 +159,10 @@
                                 <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">描述</label>
                                 <input type="text" class="form-control" name="description" value="{{ obj.description or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
                             </div>
+                            <div class="col-12" id="threshold-section-{{ obj.id }}" style="border-top:1px solid var(--border);padding-top:0.75rem;margin-top:0.25rem;">
+                                <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">状态判定阈值</label>
+                                <div id="threshold-config-{{ obj.id }}" style="font-size:0.8rem;color:var(--text-dim);">加载中...</div>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer" style="border-top: 1px solid var(--border); padding: 1rem 1.5rem;">
@@ -149,7 +174,9 @@
         </div>
     </div>
     {% endfor %}
+    </div>
 </div>
+{% endfor %}
 {% else %}
 <div class="empty-state">
     <div class="empty-icon">
@@ -176,22 +203,26 @@ function toggleMetrics(objectId) {
     }
 }
 
+var metricsData = {};
+
 function loadMetrics(objectId) {
     var listEl = document.getElementById('metrics-list-' + objectId);
     listEl.innerHTML = '加载中...';
     fetch('/api/objects/' + objectId + '/metrics')
         .then(function(r) { return r.json(); })
         .then(function(metrics) {
+            metricsData[objectId] = metrics;
             if (metrics.length === 0) {
                 listEl.innerHTML = '<span style="color:var(--text-faint);">暂无指标，点击上方添加</span>';
                 return;
             }
             var html = '';
             metrics.forEach(function(m) {
-                html += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid var(--border);">' +
-                    '<span style="flex:1;">' + escHtml(m.name) + ' <span style="color:var(--text-faint);font-size:0.7rem;">(' + escHtml(m.key) + (m.unit ? '/' + escHtml(m.unit) : '') + ')</span></span>' +
+                html += '<div class="metric-row" id="metric-row-' + objectId + '-' + m.id + '">' +
+                    '<span style="flex:1;">' + escHtml(m.name) + ' <span style="color:var(--text-faint);font-size:0.7rem;">(' + escHtml(m.key) + (m.unit ? '/' + escHtml(m.unit) : '') + ')' + (m.max_value ? ' max:' + m.max_value : '') + '</span></span>' +
                     '<label style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:0.25rem;cursor:pointer;">' +
                     '<input type="checkbox" ' + (m.show_in_chart ? 'checked' : '') + ' onchange="toggleChart(' + objectId + ',' + m.id + ',this.checked)" style="cursor:pointer;"> 图表</label>' +
+                    '<button onclick="editMetric(' + objectId + ',' + m.id + ')" style="border:none;background:none;color:var(--accent);cursor:pointer;font-size:0.72rem;padding:0.1rem 0.3rem;">编辑</button>' +
                     '<button onclick="deleteMetric(' + objectId + ',' + m.id + ')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:0.75rem;padding:0.1rem 0.3rem;">&times;</button>' +
                     '</div>';
             });
@@ -208,24 +239,111 @@ function addMetric(objectId) {
     var nameEl = document.getElementById('m-name-' + objectId);
     var keyEl = document.getElementById('m-key-' + objectId);
     var unitEl = document.getElementById('m-unit-' + objectId);
+    var maxEl = document.getElementById('m-max-' + objectId);
     var name = nameEl.value.trim();
     var key = keyEl.value.trim();
     var unit = unitEl.value.trim();
+    var maxVal = parseFloat(maxEl.value) || 100;
     if (!name || !key) { alert('名称和键不能为空'); return; }
     fetch('/api/objects/' + objectId + '/metrics', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({key: key, name: name, unit: unit, show_in_chart: true})
+        body: JSON.stringify({key: key, name: name, unit: unit, max_value: maxVal, show_in_chart: true})
     }).then(function(r) { return r.json(); }).then(function() {
-        nameEl.value = ''; keyEl.value = ''; unitEl.value = '';
+        nameEl.value = ''; keyEl.value = ''; unitEl.value = ''; maxEl.value = '100';
         document.getElementById('metrics-add-' + objectId).style.display = 'none';
         loadMetrics(objectId);
     });
 }
 
+function loadThresholdConfig(objectId) {
+    var el = document.getElementById('threshold-config-' + objectId);
+    if (!el) return;
+    fetch('/api/objects/' + objectId + '/metrics')
+        .then(function(r) { return r.json(); })
+        .then(function(metrics) {
+            if (metrics.length === 0) {
+                el.innerHTML = '<span style="color:var(--text-faint);">请先添加指标</span>';
+                return;
+            }
+            var html = '<div style="display:flex;flex-direction:column;gap:0.5rem;">';
+            metrics.forEach(function(m) {
+                var dir = m.threshold_direction || 'lt';
+                html += '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">' +
+                    '<span style="width:80px;font-weight:500;">' + escHtml(m.name) + '</span>' +
+                    '<select id="th-dir-' + objectId + '-' + m.id + '" style="width:40px;font-size:0.78rem;padding:0.15rem;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);color:var(--text);">' +
+                    '<option value="lt"' + (dir === 'lt' ? ' selected' : '') + '>&lt;</option>' +
+                    '<option value="gt"' + (dir === 'gt' ? ' selected' : '') + '>&gt;</option>' +
+                    '</select>' +
+                    '<span style="font-size:0.75rem;">异常</span>' +
+                    '<input type="number" id="th-err-' + objectId + '-' + m.id + '" value="' + (m.error_threshold !== null ? m.error_threshold : '') + '" style="width:50px;font-size:0.78rem;padding:0.15rem;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);color:var(--text);" placeholder="阈值">' +
+                    '<span style="font-size:0.75rem;">关注</span>' +
+                    '<input type="number" id="th-warn-' + objectId + '-' + m.id + '" value="' + (m.warn_threshold !== null ? m.warn_threshold : '') + '" style="width:50px;font-size:0.78rem;padding:0.15rem;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);color:var(--text);" placeholder="阈值">' +
+                    '</div>';
+            });
+            html += '</div>';
+            el.innerHTML = html;
+        });
+}
+
+function saveThresholdConfig(objectId) {
+    return fetch('/api/objects/' + objectId + '/metrics')
+        .then(function(r) { return r.json(); })
+        .then(function(metrics) {
+            var promises = metrics.map(function(m) {
+                var dirEl = document.getElementById('th-dir-' + objectId + '-' + m.id);
+                var errEl = document.getElementById('th-err-' + objectId + '-' + m.id);
+                var warnEl = document.getElementById('th-warn-' + objectId + '-' + m.id);
+                if (!dirEl) return Promise.resolve();
+                var dirVal = dirEl.value;
+                var errVal = errEl.value.trim() !== '' ? parseFloat(errEl.value) : null;
+                var warnVal = warnEl.value.trim() !== '' ? parseFloat(warnEl.value) : null;
+                return fetch('/api/objects/' + objectId + '/metrics/' + m.id, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({threshold_direction: dirVal, error_threshold: errVal, warn_threshold: warnVal})
+                });
+            });
+            return Promise.all(promises);
+        });
+}
+
 function deleteMetric(objectId, metricId) {
     fetch('/api/objects/' + objectId + '/metrics/' + metricId, {method: 'DELETE'})
         .then(function(r) { return r.json(); }).then(function() { loadMetrics(objectId); });
+}
+
+function editMetric(objectId, metricId) {
+    var row = document.getElementById('metric-row-' + objectId + '-' + metricId);
+    if (!row) return;
+    var m = (metricsData[objectId] || []).find(function(x) { return x.id === metricId; });
+    if (!m) {
+        loadMetrics(objectId);
+        return;
+    }
+
+    row.innerHTML =
+        '<input type="text" value="' + escAttr(m.name) + '" class="metric-edit-input" style="width:65px;">' +
+        '<input type="text" value="' + escAttr(m.key) + '" class="metric-edit-input" style="width:75px;">' +
+        '<input type="text" value="' + escAttr(m.unit || '') + '" class="metric-edit-input" style="width:35px;">' +
+        '<input type="number" value="' + escAttr(m.max_value || 100) + '" class="metric-edit-input" style="width:50px;">' +
+        '<button onclick="saveMetric(' + objectId + ',' + metricId + ',this)" style="font-size:0.72rem;padding:0.2rem 0.4rem;border:none;border-radius:4px;background:var(--success);color:#fff;cursor:pointer;">保存</button>' +
+        '<button onclick="loadMetrics(' + objectId + ')" style="font-size:0.72rem;padding:0.2rem 0.4rem;border:none;border-radius:4px;background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;border:1px solid var(--border);">取消</button>';
+}
+
+function saveMetric(objectId, metricId, btn) {
+    var row = document.getElementById('metric-row-' + objectId + '-' + metricId);
+    var inputs = row.querySelectorAll('.metric-edit-input');
+    var name = inputs[0].value.trim();
+    var key = inputs[1].value.trim();
+    var unit = inputs[2].value.trim();
+    var maxVal = parseFloat(inputs[3].value) || 100;
+    if (!name || !key) { alert('名称和键不能为空'); return; }
+    fetch('/api/objects/' + objectId + '/metrics/' + metricId, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, key: key, unit: unit, max_value: maxVal})
+    }).then(function(r) { return r.json(); }).then(function() { loadMetrics(objectId); });
 }
 
 function toggleChart(objectId, metricId, checked) {
@@ -241,5 +359,90 @@ function escHtml(s) {
     d.textContent = s || '';
     return d.innerHTML;
 }
+function escAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.modal').forEach(function(modal) {
+        modal.addEventListener('show.bs.modal', function(e) {
+            var objId = modal.id.replace('editModal', '');
+            loadThresholdConfig(objId);
+        });
+        modal.querySelector('form') && modal.querySelector('form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var objId = modal.id.replace('editModal', '');
+            var form = e.target;
+            saveThresholdConfig(objId).then(function() {
+                form.submit();
+            });
+        });
+    });
+});
 </script>
+<style>
+.object-group {
+    margin-bottom: 1.5rem;
+}
+.object-group-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-heading);
+    padding: 0.5rem 0;
+    margin-bottom: 0.75rem;
+    border-bottom: 2px solid var(--accent);
+}
+.object-group-count {
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 0.1rem 0.45rem;
+    border-radius: 10px;
+    background: var(--primary-soft);
+    color: var(--accent);
+}
+.clone-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+.clone-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--primary-soft);
+}
+.clone-btn-del:hover {
+    color: var(--danger);
+    border-color: var(--danger);
+    background: var(--danger-bg);
+}
+.metric-edit-input {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--border-input);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--text);
+    outline: none;
+}
+.metric-edit-input:focus { border-color: var(--accent); }
+.metric-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--border);
+}
+</style>
 {% endblock %}

@@ -49,9 +49,49 @@ def _parse_status_to_metrics(status_detail):
     return metrics
 
 
+def _check_metrics_thresholds(metrics, object_id, session):
+    """根据指标阈值配置判断巡检结果"""
+    metric_configs = session.query(ObjectMetric).filter_by(object_id=object_id).all()
+    if not metric_configs:
+        return None
+    
+    worst_result = '正常'
+    has_threshold = False
+    for mc in metric_configs:
+        if mc.error_threshold is None and mc.warn_threshold is None:
+            continue
+        
+        has_threshold = True
+        
+        # 从 metrics dict 中查找值（按 name 或 key）
+        val_str = metrics.get(mc.name) or metrics.get(mc.key)
+        if val_str is None:
+            continue
+        
+        # 提取数值
+        val_match = re.search(r'([\d.]+)', str(val_str))
+        if not val_match:
+            continue
+        val = float(val_match.group(1))
+        
+        is_gt = mc.threshold_direction == 'gt'
+        
+        if mc.error_threshold is not None:
+            if (is_gt and val > mc.error_threshold) or (not is_gt and val < mc.error_threshold):
+                return '异常'
+        
+        if mc.warn_threshold is not None:
+            if (is_gt and val > mc.warn_threshold) or (not is_gt and val < mc.warn_threshold):
+                worst_result = '需关注'
+    
+    return worst_result if has_threshold else None
+
+
 def _extract_location_from_lines(lines):
     """从行列表中提取位置信息"""
-    skip_words = ['监控点总数', '在线', '离线', '未检测', '监控点在线率', '默认区域设置', 'admin']
+    skip_words = ['监控点总数', '在线', '离线', '未检测', '监控点在线率', '默认区域设置', 'admin',
+                  '车辆总数', '在线车辆', '今日上线', '报警车辆', '全部车辆', '全部状态',
+                  '工牌', '全部', '未用', '请输入']
     
     # 优先从前面的行中提取位置（左上角区域）
     for i, line in enumerate(lines[:5]):  # 只检查前5行
@@ -86,6 +126,23 @@ def _extract_location_from_lines(lines):
     return ''
 
 
+# 位置名称映射（OCR识别结果 → 标准名称）
+LOCATION_ALIAS = {
+    '中江县综合行政执法局': '城区',
+    '中江县': '城区',
+}
+
+
+def normalize_location(name):
+    """标准化位置名称"""
+    if not name:
+        return name
+    for alias, standard in LOCATION_ALIAS.items():
+        if alias in name:
+            return standard
+    return name
+
+
 def parse_inspection_form(ocr_result):
     """解析巡检表单/仪表盘 OCR 结果"""
     if not ocr_result:
@@ -99,6 +156,12 @@ def parse_inspection_form(ocr_result):
 
     all_text = '\n'.join(lines)
 
+    # OCR 原始输出日志
+    print('=== OCR LINES ===')
+    for i, line in enumerate(lines):
+        print(f'  [{i}] {repr(line)}')
+    print('=== END ===')
+
     # 尝试解析仪表盘格式（监控系统截图）
     dashboard_result = parse_dashboard_screenshot(all_text, lines)
     if dashboard_result:
@@ -109,80 +172,203 @@ def parse_inspection_form(ocr_result):
 
 
 def parse_dashboard_screenshot(all_text, lines):
-    """解析监控系统仪表盘截图"""
+    """解析仪表盘截图（支持监控、车辆、工牌三种类型）"""
     region_name = ''
-    total = 0
-    online = 0
-    offline = 0
-    undetected = 0
     online_rate = ''
+    metrics = {}
 
-    # 识别"监控点总数"后面的大数字
-    total_match = re.search(r'监控点总数\s*(\d+)', all_text)
-    if total_match:
-        total = int(total_match.group(1))
+    # 检测仪表盘类型（用具体标签判断，避免"车辆"等词误匹配）
+    is_vehicle = '全部车辆' in all_text or '车辆总数' in all_text or '在线车辆' in all_text or '报警车辆' in all_text
+    is_badge = '工牌' in all_text or '账户设备' in all_text or ('未用' in all_text and '在线' in all_text)
+    is_monitor = '监控点总数' in all_text or '监控点在线率' in all_text
+    print(f'  PARSE: all_text={repr(all_text)}')
 
-    # 识别"在线"数量（排除"离线"、"在线率"）
-    online_match = re.search(r'(?<!离)在线\s*(\d+)', all_text)
-    if online_match:
-        online = int(online_match.group(1))
+    # 定义标签映射
+    if is_vehicle:
+        label_map = {
+            '车辆总数': 'total',
+            '在线车辆': 'online',
+            '今日上线': 'today_online',
+            '报警车辆': 'alarm',
+        }
+        print('  PARSE: 检测到车辆仪表盘')
+    elif is_badge:
+        label_map = {
+            '全部': 'total',
+            '在线': 'online',
+            '离线': 'offline',
+            '未用': 'unused',
+        }
+        print('  PARSE: 检测到工牌仪表盘')
+    else:
+        label_map = {
+            '监控点总数': 'total',
+            '在线': 'online',
+            '离线': 'offline',
+            '未检测': 'undetected',
+        }
+        print('  PARSE: 检测到监控仪表盘')
 
-    # 识别"离线"数量
-    offline_match = re.search(r'离线\s*(\d+)', all_text)
-    if offline_match:
-        offline = int(offline_match.group(1))
+    # 逐行匹配（使用队列处理连续标签无数字的情况）
+    pending_labels = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
 
-    # 识别"未检测"数量
-    undetected_match = re.search(r'未检测\s*(\d+)', all_text)
-    if undetected_match:
-        undetected = int(undetected_match.group(1))
+        # 1) 纯整数行 → 归给第一个等待数字的标签
+        if pending_labels and re.match(r'^\d+$', line):
+            num = int(line)
+            label = pending_labels.pop(0)
+            metrics[label] = num
+            print(f'  PARSE: 纯数字 {num} -> {label}')
+            continue
 
-    # 识别在线率百分比
-    rate_match = re.search(r'(\d{1,3}\.\d{1,2})%', all_text)
-    if rate_match:
-        online_rate = rate_match.group(0)
+        # 2) 车辆/工牌：匹配 "位置名（在线/总数）" 格式
+        # 例如：中江县综合行政执法局（49/89）
+        m = re.match(r'^(.+?)\s*[（(]\s*(\d+)\s*/\s*(\d+)\s*[）)]$', line)
+        if m:
+            region_name = m.group(1).strip()
+            online_val = int(m.group(2))
+            total_val = int(m.group(3))
+            metrics['online'] = online_val
+            metrics['total'] = total_val
+            print(f'  PARSE: 位置格式 {region_name} 在线={online_val} 总数={total_val}')
+            pending_labels = []
+            continue
 
-    # 识别区域名称
-    region_name = _extract_location_from_lines(lines)
+        # 3) 匹配标签行（按优先级从长到短排序，避免"在线"误匹配"在线车辆"）
+        matched_label = None
+        matched_val = None
 
-    # 必须至少识别到总数或在线数才算有效
-    if total == 0 and online == 0:
+        # 按标签长度降序排列，优先匹配长标签
+        sorted_labels = sorted(label_map.keys(), key=len, reverse=True)
+        for label in sorted_labels:
+            # 匹配 "标签数字" 或 "标签 数字" 或 "标签 (数字)"
+            patterns = [
+                rf'^{re.escape(label)}\s*\((\d+)\)$',   # 标签 (数字)
+                rf'^{re.escape(label)}\s*(\d+)$',        # 标签数字 或 标签 数字
+                rf'^{re.escape(label)}$',                 # 仅标签（等待下一行数字）
+            ]
+            for pattern in patterns:
+                m = re.match(pattern, line)
+                if m:
+                    matched_label = label_map[label]
+                    if m.lastindex and m.group(1):
+                        matched_val = int(m.group(1))
+                    break
+            if matched_label:
+                break
+
+        if matched_label:
+            if matched_val is not None:
+                metrics[matched_label] = matched_val
+            else:
+                pending_labels.append(matched_label)
+            print(f'  PARSE: {matched_label}={matched_val if matched_val is not None else "等待数字"}')
+            continue
+
+        pending_labels = []
+
+    # 识别在线率百分比（仅监控仪表盘）
+    if not is_vehicle and not is_badge:
+        rate_match = re.search(r'(\d{1,3}\.\d{1,2})%', all_text)
+        if rate_match:
+            online_rate = rate_match.group(0)
+
+    # 交叉校验：用在线率修正OCR错位的数值（在总数推算之前）
+    if not is_vehicle and not is_badge and online_rate:
+        rate_val = float(online_rate.replace('%', ''))
+        known_total = metrics.get('total', 0)
+        known_online = metrics.get('online', 0)
+        known_offline = metrics.get('offline', 0)
+        known_undetected = metrics.get('undetected', 0)
+        # 如果有总数，用在线率反算在线和离线
+        if known_total > 0:
+            expected_online = round(known_total * rate_val / 100)
+            expected_offline = max(0, known_total - expected_online - known_undetected)
+            print(f'  PARSE: 交叉校验 online {known_online}->{expected_online}, offline {known_offline}->{expected_offline} (总数{known_total}, 在线率{online_rate})')
+            metrics['online'] = expected_online
+            metrics['offline'] = expected_offline
+        # 如果没有总数但有在线和离线，且在线率=100%，修正离线=0
+        elif known_online > 0 and rate_val == 100.0 and known_offline > 0:
+            print(f'  PARSE: 在线率100%, 修正 offline {known_offline}->0')
+            metrics['offline'] = 0
+
+    # 识别区域名称（如果尚未从位置格式中提取到）
+    if not region_name:
+        region_name = _extract_location_from_lines(lines)
+    region_name = normalize_location(region_name)
+
+    # 从OCR文本中提取截图日期（仅用于日期部分，时间使用识别时间）
+    screenshot_date = None
+    time_patterns = [
+        r'(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})',  # 2026.06.26 / 2026-06-26 / 2026/06/26
+        r'(\d{4})年(\d{1,2})月(\d{1,2})日',            # 2026年06月26日
+    ]
+    for tp in time_patterns:
+        tm = re.search(tp, all_text)
+        if tm:
+            try:
+                y, mo, d = int(tm.group(1)), int(tm.group(2)), int(tm.group(3))
+                if 2020 <= y <= 2099 and 1 <= mo <= 12 and 1 <= d <= 31:
+                    screenshot_date = f'{y}-{mo:02d}-{d:02d}'
+                    print(f'  PARSE: 识别到截图日期 {screenshot_date}')
+                    break
+            except (ValueError, IndexError):
+                pass
+
+    # 必须至少识别到一个指标才算有效
+    if not metrics:
         return None
 
     # 构建状态详情
+    label_names = {v: k for k, v in label_map.items()}
     status_detail_parts = []
-    if total > 0:
-        status_detail_parts.append(f'监控点总数: {total}')
-    if online > 0:
-        status_detail_parts.append(f'在线: {online}')
-    if offline > 0:
-        status_detail_parts.append(f'离线: {offline}')
-    if undetected > 0:
-        status_detail_parts.append(f'未检测: {undetected}')
+    for key, val in metrics.items():
+        label_name = label_names.get(key, key)
+        status_detail_parts.append(f'{label_name}: {val}')
     if online_rate:
         status_detail_parts.append(f'在线率: {online_rate}')
 
     # 判断整体状态
     result = '正常'
-    if offline > 0:
-        result = '异常'
-    if online_rate:
-        rate_value = float(online_rate.replace('%', ''))
-        if rate_value < 90:
+    if is_vehicle:
+        alarm = metrics.get('alarm', 0)
+        if alarm > 0:
             result = '异常'
-        elif rate_value < 95:
-            result = '需关注'
+    elif is_badge:
+        offline = metrics.get('offline', 0)
+        if offline > 0:
+            result = '异常'
+    else:
+        offline = metrics.get('offline', 0)
+        if offline > 0:
+            result = '异常'
+        if online_rate:
+            rate_value = float(online_rate.replace('%', ''))
+            if rate_value < 90:
+                result = '异常'
+            elif rate_value < 95:
+                result = '需关注'
 
-    # 返回结果：区域名称作为location，point_name留空以便后续匹配
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    timestamp = f'{screenshot_date} {now.split(" ")[1]}' if screenshot_date else now
+    dashboard_type = 'monitor'
+    if is_vehicle:
+        dashboard_type = 'vehicle'
+    elif is_badge:
+        dashboard_type = 'badge'
     return {
-        'point_name': '',  # 留空，由保存逻辑匹配
-        'location': region_name,  # 区域名称作为位置
+        'point_name': '',
+        'location': region_name,
         'result': result,
         'status_detail': '; '.join(status_detail_parts),
         'notes': '',
         'inspector': '',
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
-        'is_dashboard': True,  # 标记为仪表盘格式
+        'timestamp': timestamp,
+        'is_dashboard': True,
+        'dashboard_type': dashboard_type,
     }
 
 
@@ -307,28 +493,40 @@ def object_detail(object_id):
             .all()
         )
 
+        all_inspectors = session.query(Inspector).all()
+        default_inspector = all_inspectors[0] if all_inspectors else None
+
         # 统计数据
         total_records = len(records)
         normal_count = sum(1 for r in records if r.result == '正常')
         abnormal_count = sum(1 for r in records if r.result == '异常')
 
-        # 按结果分组，用于图表
+        # 按结果分组，用于图表（同时间的记录加偏移避免重叠）
         result_timeline = {}
+        ts_counter = {}
         for record in records:
             result_key = record.result
             if result_key not in result_timeline:
                 result_timeline[result_key] = []
+            ts_ms = int(record.timestamp.timestamp() * 1000)
+            offset = ts_counter.get(ts_ms, 0)
+            ts_counter[ts_ms] = offset + 1
             result_timeline[result_key].append({
-                'x': record.timestamp.strftime('%Y-%m-%d %H:%M'),
+                'x': ts_ms + offset * 60000,
                 'y': 1 if record.result == '正常' else 0,
                 'result': record.result,
-                'inspector': record.inspector.name if record.inspector else '未知',
+                'inspector': record.inspector.name if record.inspector else (default_inspector.name if default_inspector else '未知'),
             })
 
         # 获取指标配置
         object_metrics = session.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
         metrics_config = [
-            {'id': m.id, 'key': m.key, 'name': m.name, 'unit': m.unit, 'show_in_chart': m.show_in_chart}
+            {
+                'id': m.id, 'key': m.key, 'name': m.name, 'unit': m.unit,
+                'max_value': m.max_value, 'show_in_chart': m.show_in_chart,
+                'warn_threshold': m.warn_threshold, 'error_threshold': m.error_threshold,
+                'threshold_direction': m.threshold_direction
+            }
             for m in object_metrics
         ]
 
@@ -358,6 +556,8 @@ def api_inspection_history(object_id):
             .all()
         )
 
+        all_inspectors = session.query(Inspector).all()
+
         data = [
             {
                 'id': r.id,
@@ -366,7 +566,7 @@ def api_inspection_history(object_id):
                 'status_detail': r.status_detail,
                 'metrics': json.loads(r.metrics) if r.metrics else {},
                 'notes': r.notes,
-                'inspector': r.inspector.name if r.inspector else '未知',
+                'inspector': r.inspector.name if r.inspector else (all_inspectors[0].name if all_inspectors else '未知'),
             }
             for r in records
         ]
@@ -489,6 +689,53 @@ def object_delete(object_id):
     return redirect(url_for('main.objects'))
 
 
+@main.route('/objects/clone/<int:object_id>', methods=['POST'])
+def object_clone(object_id):
+    """复制巡检对象"""
+    session = SessionLocal()
+    try:
+        src = session.query(InspectionObject).get(object_id)
+        if not src:
+            flash('巡检对象不存在', 'danger')
+            return redirect(url_for('main.objects'))
+
+        new_obj = InspectionObject(
+            name=src.name,
+            location='',
+            device_type=src.device_type,
+            description=src.description,
+            status=src.status
+        )
+        session.add(new_obj)
+        session.flush()
+
+        # 复制指标配置
+        src_metrics = session.query(ObjectMetric).filter_by(object_id=src.id).all()
+        for m in src_metrics:
+            new_m = ObjectMetric(
+                object_id=new_obj.id,
+                key=m.key,
+                name=m.name,
+                unit=m.unit,
+                max_value=m.max_value,
+                sort_order=m.sort_order,
+                show_in_chart=m.show_in_chart,
+                warn_threshold=m.warn_threshold,
+                error_threshold=m.error_threshold,
+                threshold_direction=m.threshold_direction
+            )
+            session.add(new_m)
+
+        session.commit()
+        flash(f'已复制 "{src.name}"，请修改位置', 'success')
+    except Exception as e:
+        session.rollback()
+        flash(f'复制失败: {e}', 'danger')
+    finally:
+        session.close()
+    return redirect(url_for('main.objects'))
+
+
 @main.route('/api/objects/list')
 def api_objects_list():
     """巡检对象列表 API"""
@@ -541,8 +788,12 @@ def api_object_metrics_list(object_id):
                 'key': m.key,
                 'name': m.name,
                 'unit': m.unit,
+                'max_value': m.max_value,
                 'show_in_chart': m.show_in_chart,
                 'sort_order': m.sort_order,
+                'warn_threshold': m.warn_threshold,
+                'error_threshold': m.error_threshold,
+                'threshold_direction': m.threshold_direction,
             }
             for m in metrics
         ])
@@ -561,18 +812,25 @@ def api_object_metrics_add(object_id):
     unit = data.get('unit', '').strip()
     show_in_chart = data.get('show_in_chart', True)
     sort_order = data.get('sort_order', 0)
+    max_value = data.get('max_value', 100)
+    warn_threshold = data.get('warn_threshold')
+    error_threshold = data.get('error_threshold')
+    threshold_direction = data.get('threshold_direction', 'lt')
     if not key or not name:
         return jsonify({'error': 'key 和 name 不能为空'}), 400
     session = SessionLocal()
     try:
         metric = ObjectMetric(
             object_id=object_id, key=key, name=name,
-            unit=unit, show_in_chart=show_in_chart, sort_order=sort_order
+            unit=unit, max_value=max_value, show_in_chart=show_in_chart, sort_order=sort_order,
+            warn_threshold=warn_threshold, error_threshold=error_threshold, threshold_direction=threshold_direction
         )
         session.add(metric)
         session.commit()
         return jsonify({'id': metric.id, 'key': metric.key, 'name': metric.name,
-                        'unit': metric.unit, 'show_in_chart': metric.show_in_chart})
+                        'unit': metric.unit, 'max_value': metric.max_value, 'show_in_chart': metric.show_in_chart,
+                        'warn_threshold': metric.warn_threshold, 'error_threshold': metric.error_threshold,
+                        'threshold_direction': metric.threshold_direction})
     finally:
         session.close()
 
@@ -586,14 +844,24 @@ def api_object_metrics_update(object_id, metric_id):
         metric = session.query(ObjectMetric).filter_by(id=metric_id, object_id=object_id).first()
         if not metric:
             return jsonify({'error': '指标不存在'}), 404
+        if 'key' in data:
+            metric.key = data['key']
         if 'name' in data:
             metric.name = data['name']
         if 'unit' in data:
             metric.unit = data['unit']
         if 'show_in_chart' in data:
             metric.show_in_chart = data['show_in_chart']
+        if 'max_value' in data:
+            metric.max_value = data['max_value']
         if 'sort_order' in data:
             metric.sort_order = data['sort_order']
+        if 'warn_threshold' in data:
+            metric.warn_threshold = data['warn_threshold']
+        if 'error_threshold' in data:
+            metric.error_threshold = data['error_threshold']
+        if 'threshold_direction' in data:
+            metric.threshold_direction = data['threshold_direction']
         session.commit()
         return jsonify({'ok': True})
     finally:
@@ -611,6 +879,36 @@ def api_object_metrics_delete(object_id, metric_id):
         session.delete(metric)
         session.commit()
         return jsonify({'ok': True})
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/<int:object_id>/re-evaluate', methods=['POST'])
+def api_re_evaluate_records(object_id):
+    """根据当前阈值配置重新评估该对象所有巡检记录的异常状态"""
+    session = SessionLocal()
+    try:
+        records = session.query(InspectionRecord).filter_by(object_id=object_id).all()
+        if not records:
+            return jsonify({'updated': 0})
+        updated = 0
+        for record in records:
+            parsed_metrics = _parse_status_to_metrics(record.status_detail or '')
+            if record.metrics:
+                try:
+                    stored = json.loads(record.metrics) if isinstance(record.metrics, str) else record.metrics
+                    parsed_metrics.update(stored)
+                except Exception:
+                    pass
+            threshold_result = _check_metrics_thresholds(parsed_metrics, object_id, session)
+            if threshold_result is not None and record.result != threshold_result:
+                record.result = threshold_result
+                updated += 1
+        session.commit()
+        return jsonify({'updated': updated})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         session.close()
 
@@ -851,6 +1149,8 @@ def api_records_import():
             inspector = None
             if inspector_name:
                 inspector = _match_inspector(inspector_name, all_inspectors)
+            if not inspector and all_inspectors:
+                inspector = all_inspectors[0]
 
             # 解析时间
             timestamp = None
@@ -864,6 +1164,12 @@ def api_records_import():
                         timestamp = datetime.now()
             else:
                 timestamp = datetime.now()
+
+            # 根据指标阈值重新判断结果
+            parsed_metrics = _parse_status_to_metrics(status_detail or '')
+            threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, session)
+            if threshold_result:
+                result = threshold_result
 
             record = InspectionRecord(
                 point_id=obj.id,
@@ -991,8 +1297,16 @@ def api_save():
 
             # 匹配巡检人员
             inspector = None
-            if inspector_name:
+            front_inspector_id = item.get('inspector_id')
+            if front_inspector_id:
+                try:
+                    inspector = session.query(Inspector).get(int(front_inspector_id))
+                except (ValueError, TypeError):
+                    inspector = None
+            if not inspector and inspector_name:
                 inspector = _match_inspector(inspector_name, all_inspectors)
+            if not inspector and all_inspectors:
+                inspector = all_inspectors[0]
 
             # 解析时间
             timestamp = None
@@ -1007,13 +1321,19 @@ def api_save():
             else:
                 timestamp = datetime.now()
 
+            # 根据指标阈值重新判断结果
+            parsed_metrics = _parse_status_to_metrics(status_detail)
+            threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, session)
+            if threshold_result:
+                result = threshold_result
+
             record = InspectionRecord(
                 point_id=obj.id,
                 object_id=obj.id,
                 inspector_id=inspector.id if inspector else None,
                 result=result,
                 status_detail=status_detail,
-                metrics=json.dumps(_parse_status_to_metrics(status_detail), ensure_ascii=False),
+                metrics=json.dumps(parsed_metrics, ensure_ascii=False),
                 notes=notes,
                 timestamp=timestamp
             )
@@ -1114,12 +1434,12 @@ def _match_inspector(name, all_inspectors):
     return None
 
 
-@main.route('/export/json')
-def export_json():
-    """导出 JSON"""
+@main.route('/api/export/json')
+def api_export_json():
+    """导出 JSON 数据 API"""
     session = SessionLocal()
     try:
-        objects = session.query(InspectionObject).all()
+        objects = session.query(InspectionObject).filter_by(status='active').all()
         data = []
         for obj in objects:
             records = (
@@ -1150,35 +1470,6 @@ def export_json():
             json.dumps(data, ensure_ascii=False, indent=2),
             mimetype='application/json',
             headers={'Content-Disposition': 'attachment; filename="inspection_data.json"'}
-        )
-    finally:
-        session.close()
-
-
-@main.route('/export/html')
-def export_html():
-    """导出 HTML"""
-    session = SessionLocal()
-    try:
-        objects = session.query(InspectionObject).all()
-        all_data = []
-        for obj in objects:
-            records = (
-                session.query(InspectionRecord)
-                .filter_by(object_id=obj.id)
-                .order_by(InspectionRecord.timestamp.desc())
-                .all()
-            )
-            all_data.append({
-                'object': obj,
-                'records': records,
-            })
-
-        html = render_template('export.html', all_data=all_data, now=datetime.utcnow())
-        return Response(
-            html,
-            mimetype='text/html',
-            headers={'Content-Disposition': 'attachment; filename="inspection_report.html"'}
         )
     finally:
         session.close()

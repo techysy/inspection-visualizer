@@ -77,7 +77,7 @@
     --primary: #6366f1;
     --primary-hover: #4f46e5;
     --primary-glow: rgba(99, 102, 241, 0.2);
-    --primary-soft: rgba(99, 102, 241, 0.1);
+    --primary-soft: rgba(99, 102, 241, 0.15);
     --primary-border: rgba(99, 102, 241, 0.3);
     --danger: #ef4444;
     --danger-border: rgba(239, 68, 68, 0.25);
@@ -156,8 +156,11 @@ body {
 }
 
 .nav-link.active {
-    color: var(--text-heading) !important;
-    background: var(--primary-soft);
+    color: var(--primary) !important;
+    background: var(--primary-soft) !important;
+    font-weight: 600;
+    border-bottom: 2px solid var(--primary);
+    border-radius: 8px 8px 0 0;
 }
 
 .navbar-toggler {
@@ -681,6 +684,7 @@ h5.card-title::before {
     flex-shrink: 0;
 }
 .store-info {
+    flex: 1;
     min-width: 0;
 }
 .store-name {
@@ -761,7 +765,7 @@ h5.card-title::before {
     border-radius: 6px;
     font-weight: 500;
 }
-.tag-format { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
+.tag-format { background: rgba(99,102,241,0.15); color: var(--accent); border: 1px solid rgba(99,102,241,0.3); font-weight: 600; }
 .tag-type { background: rgba(251,191,36,0.15); color: #f59e0b; border: 1px solid rgba(251,191,36,0.3); }
 .tag-iso { background: var(--bg-input); color: var(--text-secondary); border: 1px solid var(--border); }
 .tag-expiry { background: var(--bg-input); color: var(--text-muted); border: 1px solid var(--border); }

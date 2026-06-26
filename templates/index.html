@@ -8,17 +8,6 @@
         <h1 class="mb-2">巡检数据可视化</h1>
         <p class="text-muted">IT运维巡检记录管理与可视化分析</p>
     </div>
-    {% if object_data %}
-    <div class="d-flex gap-2">
-        <div class="dropdown">
-            <button class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" style="border-radius:8px; font-size:0.85rem;">&#8681; 导出</button>
-            <ul class="dropdown-menu dropdown-menu-end" style="border-radius:10px; border:1px solid var(--border); background:var(--bg-modal);">
-                <li><a class="dropdown-item" href="{{ url_for('main.export_html') }}" style="font-size:0.85rem;">导出 HTML</a></li>
-                <li><a class="dropdown-item" href="{{ url_for('main.export_json') }}" style="font-size:0.85rem;">导出 JSON</a></li>
-            </ul>
-        </div>
-    </div>
-    {% endif %}
 </div>
 
 {% if object_data %}
@@ -41,6 +30,9 @@
         <button class="filter-btn type-btn" data-filter="存储" data-group="device_type">存储</button>
         <button class="filter-btn type-btn" data-filter="UPS" data-group="device_type">UPS</button>
         <button class="filter-btn type-btn" data-filter="空调" data-group="device_type">空调</button>
+        <button class="filter-btn type-btn" data-filter="监控" data-group="device_type">监控</button>
+        <button class="filter-btn type-btn" data-filter="车辆" data-group="device_type">车辆</button>
+        <button class="filter-btn type-btn" data-filter="工牌" data-group="device_type">工牌</button>
     </div>
 </div>
 
@@ -64,7 +56,7 @@
                         {% endif %}
                     </div>
                     <div class="film-meta">
-                        {% if item.object.location %}<span>{{ item.object.location }}</span>{% endif %}
+                        {% if item.object.location %}<span class="tag-format" style="font-weight:600;">{{ item.object.location }}</span>{% endif %}
                         {% if item.object.device_type %}<span>{{ item.object.device_type }}</span>{% endif %}
                         {% if item.latest_record.timestamp %}<span>{{ item.latest_record.timestamp.strftime('%Y.%m.%d') }}</span>{% endif %}
                     </div>

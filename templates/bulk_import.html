@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}批量导入 - 巡检数据可视化{% endblock %}
+{% block title %}数据导入导出 - 巡检数据可视化{% endblock %}
 
 {% block content %}
-<h1 class="mb-4">批量导入</h1>
+<h1 class="mb-4">数据导入导出</h1>
 
 <div class="row g-4">
-    <div class="col-12">
-        <div class="card">
+    <div class="col-md-7">
+        <div class="card h-100">
             <div class="card-body">
                 <h5 class="card-title">导入巡检记录</h5>
-                <p class="card-text mb-3">支持粘贴 Markdown 表格、CSV 数据或上传 .md 文件</p>
+                <p class="card-text mb-3">支持粘贴 Markdown 表格、CSV 数据或上传 .md / .json 文件</p>
 
                 <div id="drop-zone" class="drop-zone mb-3">
                     <div class="drop-zone-content">
@@ -18,10 +18,10 @@
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                             <polyline points="14 2 14 8 20 8"/>
                         </svg>
-                        <p>拖入 .md 文件或点击选择</p>
-                        <small class="text-muted">支持 Markdown 巡检日报文件</small>
+                        <p>拖入 .md 或 .json 文件或点击选择</p>
+                        <small class="text-muted">支持 Markdown 巡检日报文件和 JSON 数据文件</small>
                     </div>
-                    <input type="file" id="file-input" accept=".md,.markdown" style="display:none">
+                    <input type="file" id="file-input" accept=".md,.markdown,.json" style="display:none">
                 </div>
 
                 <div id="file-info" style="display:none" class="mb-3">
@@ -32,14 +32,46 @@
                     </div>
                 </div>
 
-                <textarea id="records-text" class="import-textarea" rows="10" placeholder="或粘贴数据，支持以下格式：&#10;&#10;Markdown 表格：&#10;| 位置名称 | 巡检时间 | 结果 | 巡检人员 | 状态详情 | 备注 |&#10;|----------|----------|------|----------|----------|------|&#10;| 中江县 | 2024-01-15 10:00 | 正常 | 张三 | 在线率 99% | 无 |&#10;| 三园区垃圾站 | 2024-01-15 11:00 | 异常 | 李四 | 离线5台 | 需检查 |&#10;&#10;CSV 格式（逗号分隔）：&#10;中江县,2024-01-15 10:00,正常,张三,在线率 99%,无&#10;三园区垃圾站,2024-01-15 11:00,异常,李四,离线5台,需检查"></textarea>
+                <textarea id="records-text" class="import-textarea" rows="12" placeholder="或粘贴数据，支持以下格式：&#10;&#10;Markdown 表格：&#10;| 位置名称 | 巡检时间 | 结果 | 巡检人员 | 状态详情 | 备注 |&#10;|----------|----------|------|----------|----------|------|&#10;| 中江县 | 2024-01-15 10:00 | 正常 | 张三 | 在线率 99% | 无 |&#10;| 三园区垃圾站 | 2024-01-15 11:00 | 异常 | 李四 | 离线5台 | 需检查 |&#10;&#10;CSV 格式（逗号分隔）：&#10;中江县,2024-01-15 10:00,正常,张三,在线率 99%,无&#10;三园区垃圾站,2024-01-15 11:00,异常,李四,离线5台,需检查&#10;&#10;JSON 格式会自动识别并导入"></textarea>
 
                 <div class="mt-3 d-flex gap-2">
-                    <button id="btn-import-records" class="btn btn-primary">导入巡检记录</button>
+                    <button id="btn-parse-records" class="btn btn-primary">识别</button>
                     <span id="records-status" class="import-status"></span>
+                </div>
+
+                <div id="preview-area" style="display:none" class="mt-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <small class="text-muted">识别到 <strong id="preview-count">0</strong> 条记录，请确认：</small>
+                        <button id="btn-clear-preview" class="btn btn-sm btn-outline-secondary">清空</button>
+                    </div>
+                    <div class="table-responsive" style="max-height:260px;overflow:auto;border:1px solid var(--border-input);border-radius:8px;">
+                        <table class="table table-sm mb-0" style="font-size:0.8rem;">
+                            <thead class="table-light" style="position:sticky;top:0;">
+                                <tr><th>位置</th><th>时间</th><th>结果</th><th>巡检人</th><th>状态详情</th></tr>
+                            </thead>
+                            <tbody id="preview-body"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 d-flex gap-2">
+                        <button id="btn-import-records" class="btn btn-success">确认导入</button>
+                        <span id="import-status" class="import-status"></span>
+                    </div>
                 </div>
             </div>
         </div>
+    </div>
+
+    <div class="col-md-5">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">导出数据</h5>
+                <p class="card-text mb-3">导出所有巡检数据为 JSON 文件，可用于备份或迁移</p>
+                <button id="btn-export-json" class="btn btn-primary">导出 JSON</button>
+                <span id="export-status" class="import-status ms-2"></span>
+            </div>
+        </div>
+
+
     </div>
 </div>
 {% endblock %}
@@ -47,6 +79,27 @@
 {% block extra_js %}
 <script>
 (function() {
+    // ========== JSON 导出 ==========
+    document.getElementById('btn-export-json').addEventListener('click', async () => {
+        const status = document.getElementById('export-status');
+        status.innerHTML = '<span style="color:var(--text-muted);">导出中...</span>';
+        try {
+            const resp = await fetch('/api/export/json');
+            if (!resp.ok) throw new Error('导出失败');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'inspection_data.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            status.innerHTML = '<span style="color:var(--success);">导出成功</span>';
+        } catch(e) {
+            status.innerHTML = '<span style="color:var(--danger);">导出失败: ' + e.message + '</span>';
+        }
+    });
+
+    // ========== 左侧 Markdown/CSV/JSON 导入 ==========
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const fileInfo = document.getElementById('file-info');
@@ -55,23 +108,16 @@
     const btnClearFile = document.getElementById('btn-clear-file');
     const recordsText = document.getElementById('records-text');
 
-    // 文件上传
     dropZone.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
-
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
-        handleFile(e.dataTransfer.files[0]);
-    });
+    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
 
     function handleFile(file) {
-        if (!file || !file.name.endsWith('.md')) {
-            alert('请选择 .md 文件');
-            return;
-        }
+        if (!file) return;
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (ext !== 'md' && ext !== 'markdown' && ext !== 'json') { alert('请选择 .md 或 .json 文件'); return; }
         const reader = new FileReader();
         reader.onload = (e) => {
             recordsText.value = e.target.result;
@@ -79,6 +125,7 @@
             fileSize.textContent = (file.size / 1024).toFixed(1) + ' KB';
             fileInfo.style.display = 'block';
             dropZone.style.display = 'none';
+            showPreview();
         };
         reader.readAsText(file);
     }
@@ -90,97 +137,194 @@
         fileInput.value = '';
     });
 
-    // 解析 Markdown 表格或 CSV
     function parseData(text) {
         if (!text.trim()) return [];
-
-        const lines = text.trim().split('\n');
-        const data = [];
-
-        // 检测是否为 Markdown 表格
-        const isMarkdown = lines.some(line => line.trim().startsWith('|'));
-
-        if (isMarkdown) {
-            // 解析 Markdown 表格
-            let headerFound = false;
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed.startsWith('|')) continue;
-
-                // 移除首尾的 |
-                const content = trimmed.slice(1, -1);
-                const cells = content.split('|').map(c => c.trim());
-
-                // 跳过分隔行（如 |---|---|）
-                if (cells.every(c => c.match(/^[-:]+$/))) continue;
-
-                // 第一行是标题行，跳过
-                if (!headerFound) {
-                    headerFound = true;
-                    continue;
+        var trimmed = text.trim();
+        // JSON 格式
+        if (trimmed.startsWith('[')) {
+            try {
+                var jsonData = JSON.parse(trimmed);
+                if (!Array.isArray(jsonData)) return [];
+                var records = [];
+                for (var oi = 0; oi < jsonData.length; oi++) {
+                    var obj = jsonData[oi];
+                    if (!obj.records || !Array.isArray(obj.records)) continue;
+                    for (var ri = 0; ri < obj.records.length; ri++) {
+                        var r = obj.records[ri];
+                        records.push({
+                            point_name: obj.name || '',
+                            timestamp: r.timestamp || '',
+                            result: r.result || '正常',
+                            inspector_name: r.inspector || '',
+                            status_detail: r.status_detail || '',
+                            notes: r.notes || ''
+                        });
+                    }
                 }
-
-                data.push(cells);
+                return records.filter(function(r) { return r.point_name; });
+            } catch(e) { return []; }
+        }
+        var lines = trimmed.split('\n');
+        var isMarkdown = lines.some(function(line) { return line.trim().startsWith('|'); });
+        if (!isMarkdown) {
+            var data = [];
+            for (var li = 0; li < lines.length; li++) {
+                var lineTrimmed = lines[li].trim();
+                if (!lineTrimmed) continue;
+                data.push(lineTrimmed.split(',').map(function(c) { return c.trim(); }));
             }
-        } else {
-            // 解析 CSV
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed) continue;
-
-                const cells = trimmed.split(',').map(c => c.trim());
-                data.push(cells);
+            return data;
+        }
+        // Markdown: 按 --- 分段，找到含巡检数据表的部分
+        var sections = trimmed.split(/\n---+\s*\n/);
+        var dataHeaders = ['位置', '巡检', '结果', '时间', '人员', '状态'];
+        for (var si = 0; si < sections.length; si++) {
+            var secLines = sections[si].split('\n');
+            var tables = [];
+            var currentTable = [];
+            for (var tli = 0; tli < secLines.length; tli++) {
+                var sl = secLines[tli].trim();
+                if (sl.startsWith('|')) {
+                    currentTable.push(sl);
+                } else {
+                    if (currentTable.length > 0) { tables.push(currentTable); currentTable = []; }
+                }
+            }
+            if (currentTable.length > 0) tables.push(currentTable);
+            for (var ti = 0; ti < tables.length; ti++) {
+                var tbl = tables[ti];
+                if (tbl.length < 2) continue;
+                var headerLine = tbl[0];
+                var headerCells = headerLine.slice(1, -1).split('|').map(function(c) { return c.trim().toLowerCase(); });
+                var isDataTable = headerCells.some(function(h) {
+                    return dataHeaders.some(function(kw) { return h.indexOf(kw) !== -1; });
+                });
+                if (!isDataTable) continue;
+                var result = [];
+                for (var rowIdx = 2; rowIdx < tbl.length; rowIdx++) {
+                    var cells = tbl[rowIdx].slice(1, -1).split('|').map(function(c) { return c.trim(); });
+                    if (cells.length >= 3 && cells[0]) result.push(cells);
+                }
+                if (result.length > 0) return { headers: headerCells, rows: result };
             }
         }
-
-        return data;
+        return [];
     }
 
-    // 导入巡检记录
-    document.getElementById('btn-import-records').addEventListener('click', async () => {
-        const text = recordsText.value;
-        const status = document.getElementById('records-status');
+    var previewArea = document.getElementById('preview-area');
+    var previewBody = document.getElementById('preview-body');
+    var previewCount = document.getElementById('preview-count');
+    var cachedRecords = [];
 
-        const data = parseData(text);
-        if (data.length === 0) {
-            status.innerHTML = '<span style="color:var(--danger);">未识别到有效数据</span>';
-            return;
+    function toRecords(parsed) {
+        if (parsed.length > 0 && typeof parsed[0] === 'object' && parsed[0].point_name !== undefined) {
+            return parsed.filter(function(r) { return r.point_name; });
         }
-
-        const records = data.map(row => ({
-            point_name: row[0] || '',
-            timestamp: row[1] || '',
-            result: row[2] || '正常',
-            inspector_name: row[3] || '',
-            status_detail: row[4] || '',
-            notes: row[5] || ''
-        })).filter(r => r.point_name);
-
-        if (records.length === 0) {
-            status.innerHTML = '<span style="color:var(--danger);">位置名称不能为空</span>';
-            return;
+        // 新格式：带 headers 的对象
+        if (parsed && parsed.headers && parsed.rows) {
+            var h = parsed.headers;
+            var colMap = { point_name: -1, timestamp: -1, result: -1, inspector_name: -1, status_detail: -1, notes: -1 };
+            var keywords = {
+                point_name: ['位置', '点位', '对象', '名称'],
+                timestamp: ['时间', '日期', '巡检时间'],
+                result: ['结果', '状态', '巡检结果'],
+                inspector_name: ['人员', '巡检人', '巡检人员'],
+                status_detail: ['详情', '状态详情', '说明'],
+                notes: ['备注', '注']
+            };
+            for (var field in keywords) {
+                for (var ki = 0; ki < keywords[field].length; ki++) {
+                    for (var hi = 0; hi < h.length; hi++) {
+                        if (h[hi].indexOf(keywords[field][ki]) !== -1) { colMap[field] = hi; break; }
+                    }
+                    if (colMap[field] !== -1) break;
+                }
+            }
+            // 默认值：如果没匹配到，按位置兜底
+            if (colMap.point_name === -1) colMap.point_name = 0;
+            if (colMap.timestamp === -1) colMap.timestamp = 1;
+            if (colMap.result === -1) colMap.result = 2;
+            if (colMap.inspector_name === -1) colMap.inspector_name = 3;
+            if (colMap.status_detail === -1) colMap.status_detail = 4;
+            if (colMap.notes === -1) colMap.notes = 5;
+            return parsed.rows.map(function(row) {
+                return {
+                    point_name: row[colMap.point_name] || '',
+                    timestamp: row[colMap.timestamp] || '',
+                    result: row[colMap.result] || '正常',
+                    inspector_name: row[colMap.inspector_name] || '',
+                    status_detail: row[colMap.status_detail] || '',
+                    notes: row[colMap.notes] || ''
+                };
+            }).filter(function(r) { return r.point_name; });
         }
+        // 旧格式：纯数组
+        return parsed.map(function(row) {
+            return { point_name: row[0]||'', timestamp: row[1]||'', result: row[2]||'正常', inspector_name: row[3]||'', status_detail: row[4]||'', notes: row[5]||'' };
+        }).filter(function(r) { return r.point_name; });
+    }
 
+    function showPreview() {
+        var text = recordsText.value;
+        if (!text.trim()) { previewArea.style.display = 'none'; cachedRecords = []; return; }
+        var parsed = parseData(text);
+        cachedRecords = toRecords(parsed);
+        if (cachedRecords.length === 0) { previewArea.style.display = 'none'; return; }
+        previewCount.textContent = cachedRecords.length;
+        var html = '';
+        var resultColors = { '正常': 'success', '异常': 'danger', '需关注': 'warning' };
+        for (var i = 0; i < cachedRecords.length; i++) {
+            var r = cachedRecords[i];
+            var cls = resultColors[r.result] || 'secondary';
+            html += '<tr><td>' + escHtml(r.point_name) + '</td><td>' + escHtml(r.timestamp) + '</td><td><span class="badge bg-' + cls + '">' + escHtml(r.result) + '</span></td><td>' + escHtml(r.inspector_name) + '</td><td>' + escHtml(r.status_detail) + '</td></tr>';
+        }
+        previewBody.innerHTML = html;
+        previewArea.style.display = 'block';
+    }
+
+    document.getElementById('btn-parse-records').addEventListener('click', function() {
+        var status = document.getElementById('records-status');
+        var text = recordsText.value;
+        if (!text.trim()) { status.innerHTML = '<span style="color:var(--danger);">请先粘贴数据或选择文件</span>'; return; }
+        var parsed = parseData(text);
+        cachedRecords = toRecords(parsed);
+        if (cachedRecords.length === 0) { status.innerHTML = '<span style="color:var(--danger);">未识别到有效数据</span>'; previewArea.style.display = 'none'; return; }
+        status.innerHTML = '<span style="color:var(--success);">识别完成</span>';
+        previewCount.textContent = cachedRecords.length;
+        var html = '';
+        var resultColors = { '正常': 'success', '异常': 'danger', '需关注': 'warning' };
+        for (var i = 0; i < cachedRecords.length; i++) {
+            var r = cachedRecords[i];
+            var cls = resultColors[r.result] || 'secondary';
+            html += '<tr><td>' + escHtml(r.point_name) + '</td><td>' + escHtml(r.timestamp) + '</td><td><span class="badge bg-' + cls + '">' + escHtml(r.result) + '</span></td><td>' + escHtml(r.inspector_name) + '</td><td>' + escHtml(r.status_detail) + '</td></tr>';
+        }
+        previewBody.innerHTML = html;
+        previewArea.style.display = 'block';
+    });
+
+    document.getElementById('btn-clear-preview').addEventListener('click', function() {
+        recordsText.value = '';
+        previewArea.style.display = 'none';
+        cachedRecords = [];
+        document.getElementById('records-status').innerHTML = '';
+    });
+
+    document.getElementById('btn-import-records').addEventListener('click', async function() {
+        var status = document.getElementById('import-status');
+        if (cachedRecords.length === 0) { status.innerHTML = '<span style="color:var(--danger);">请先识别数据</span>'; return; }
         status.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
-
         try {
-            const resp = await fetch('/api/records/import', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({records})
-            });
-            const result = await resp.json();
+            var resp = await fetch('/api/records/import', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({records: cachedRecords}) });
+            var result = await resp.json();
             if (result.error) {
                 status.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
             } else {
-                let msg = '成功导入 ' + result.imported + ' 条记录';
+                var msg = '成功导入 ' + result.imported + ' 条记录';
                 if (result.created > 0) msg += '，自动创建 ' + result.created + ' 个位置';
                 if (result.skipped > 0) msg += '，跳过 ' + result.skipped + ' 条';
                 status.innerHTML = '<span style="color:var(--success);">' + msg + '</span>';
             }
-        } catch(e) {
-            status.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>';
-        }
+        } catch(e) { status.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>'; }
     });
 })();
 </script>

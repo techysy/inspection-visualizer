@@ -10,15 +10,6 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-1">
     <a href="/" class="back-link">&larr; 返回首页</a>
-    <div class="export-group">
-        <div class="dropdown">
-            <button class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" style="border-radius:8px; font-size:0.85rem;">&#8681; 导出全部</button>
-            <ul class="dropdown-menu dropdown-menu-end" style="border-radius:10px; border:1px solid var(--border); background:var(--bg-modal);">
-                <li><a class="dropdown-item" href="{{ url_for('main.export_html') }}" style="font-size:0.85rem;">导出 HTML</a></li>
-                <li><a class="dropdown-item" href="{{ url_for('main.export_json') }}" style="font-size:0.85rem;">导出 JSON</a></li>
-            </ul>
-        </div>
-    </div>
 </div>
 
 <h1 class="mt-3 mb-4">{{ object.name }}</h1>
@@ -78,11 +69,16 @@
 <div class="card mb-4">
     <div class="card-body">
         <h5 class="card-title">指标趋势</h5>
-        <div class="chart-wrapper">
-            <div style="position: relative; height: 350px;">
-                <canvas id="metricsChart"></canvas>
+        {% for mc in metrics_config %}
+        {% if mc.show_in_chart %}
+        <div class="chart-wrapper mb-3">
+            <div style="font-size:0.8rem;font-weight:500;color:var(--text-secondary);margin-bottom:0.4rem;">{{ mc.name }}{% if mc.unit %} ({{ mc.unit }}){% endif %}</div>
+            <div style="position: relative; height: 220px;">
+                <canvas id="metricChart{{ mc.id }}"></canvas>
             </div>
         </div>
+        {% endif %}
+        {% endfor %}
     </div>
 </div>
 {% endif %}
@@ -131,33 +127,52 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/objects/{{ object.id }}/re-evaluate', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) { if (data.updated > 0) location.reload(); });
+
         var root = document.documentElement;
         function cv(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
 
         var ctx = document.getElementById('resultChart').getContext('2d');
-        var datasets = [];
         var colors = {
             '正常': '#22c55e',
             '异常': '#ef4444',
             '需关注': '#f59e0b'
         };
 
+        var allData = [];
         {% for result, data in result_timeline.items() %}
-            datasets.push({
-                label: '{{ result }}',
-                data: {{ data|tojson }},
-                borderColor: colors['{{ result }}'] || '#818cf8',
-                backgroundColor: (colors['{{ result }}'] || '#818cf8') + '15',
-                borderWidth: 2,
-                tension: 0.4,
-                pointRadius: 4,
-                pointHoverRadius: 6,
-                pointBackgroundColor: colors['{{ result }}'] || '#818cf8',
-                pointBorderColor: cv('--bg'),
-                pointBorderWidth: 2,
-                fill: false
-            });
+            {% for item in data %}
+                allData.push({{ item|tojson }});
+            {% endfor %}
         {% endfor %}
+        allData.sort(function(a, b) { return a.x - b.x; });
+
+        var pointColors = allData.map(function(d) { return colors[d.result] || '#818cf8'; });
+
+        datasets = [{
+            label: '巡检结果',
+            data: allData,
+            borderColor: '#818cf8',
+            backgroundColor: '#818cf815',
+            borderWidth: 2,
+            tension: 0.4,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            pointBackgroundColor: pointColors,
+            pointBorderColor: cv('--bg'),
+            pointBorderWidth: 2,
+            fill: false,
+            segment: {
+                borderColor: function(ctx) {
+                    var p0 = ctx.p0.parsed.y;
+                    var p1 = ctx.p1.parsed.y;
+                    if (p0 === 0 || p1 === 0) return '#ef4444';
+                    return '#22c55e';
+                }
+            }
+        }];
 
         var chart = new Chart(ctx, {
             type: 'line',
@@ -166,7 +181,8 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: { duration: 0 },
-                interaction: { mode: 'index', intersect: false },
+                interaction: { mode: 'nearest', intersect: false },
+                layout: { padding: { bottom: 0 } },
                 scales: {
                     x: {
                         type: 'time',
@@ -176,10 +192,10 @@
                         title: { display: true, text: '日期', color: cv('--text-dim'), font: { size: 11, weight: 500 } }
                     },
                     y: {
-                        beginAtZero: true,
-                        max: 1,
+                        min: -0.2,
+                        max: 1.2,
                         grid: { color: cv('--grid-line'), drawBorder: false },
-                        ticks: { color: cv('--text-dim'), font: { size: 11 }, callback: function(v) { return v === 1 ? '正常' : v === 0 ? '异常' : ''; } },
+                        ticks: { color: cv('--text-dim'), font: { size: 11 }, stepSize: 1, callback: function(v) { return v === 0 ? '异常' : v === 1 ? '正常' : ''; } },
                         title: { display: true, text: '状态', color: cv('--text-dim'), font: { size: 11, weight: 500 } }
                     }
                 },
@@ -204,7 +220,7 @@
                                 }
                                 return '';
                             },
-                            label: function(c) { return c.dataset.label + ': ' + c.raw.result + ' (巡检人: ' + c.raw.inspector + ')'; }
+                            label: function(c) { return c.raw.result + ' (巡检人: ' + c.raw.inspector + ')'; }
                         }
                     },
                     legend: {
@@ -214,7 +230,14 @@
                             usePointStyle: true,
                             pointStyle: 'circle',
                             padding: 20,
-                            font: { size: 12 }
+                            font: { size: 12 },
+                            generateLabels: function(chart) {
+                                return [
+                                    { text: '正常', fillStyle: '#22c55e', strokeStyle: '#22c55e', lineWidth: 0, pointStyle: 'circle', hidden: false },
+                                    { text: '异常', fillStyle: '#ef4444', strokeStyle: '#ef4444', lineWidth: 0, pointStyle: 'circle', hidden: false },
+                                    { text: '需关注', fillStyle: '#f59e0b', strokeStyle: '#f59e0b', lineWidth: 0, pointStyle: 'circle', hidden: false }
+                                ];
+                            }
                         }
                     }
                 }
@@ -289,89 +312,92 @@
                 html += '</div>';
                 el.innerHTML = html;
 
-                renderMetricsChart(data);
+                renderMetricsCharts(data);
             });
     }
 
-    function renderMetricsChart(historyData) {
-        var canvas = document.getElementById('metricsChart');
-        if (!canvas) return;
-        var chartMetrics = metricsConfig.filter(function(m) { return m.show_in_chart; });
-        if (chartMetrics.length === 0) return;
-
+    function renderMetricsCharts(historyData) {
         var root = document.documentElement;
         function cv(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
-        var palette = ['#6366f1','#22c55e','#ef4444','#f59e0b','#06b6d4','#ec4899'];
 
-        var labels = [];
-        var dataRev = historyData.slice().reverse();
-        dataRev.forEach(function(item) {
-            if (item.timestamp) {
+        metricsConfig.forEach(function(mc) {
+            if (!mc.show_in_chart) return;
+            var canvas = document.getElementById('metricChart' + mc.id);
+            if (!canvas) return;
+
+            var dataRev = historyData.slice().reverse();
+            var labels = dataRev.map(function(item) {
+                if (!item.timestamp) return '';
                 var d = new Date(item.timestamp);
-                labels.push(d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0'));
-            } else {
-                labels.push('');
-            }
-        });
-
-        var datasets = chartMetrics.map(function(mc, idx) {
+                return String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+            });
             var values = dataRev.map(function(item) {
                 var m = item.metrics || {};
                 var val = m[mc.name] || m[mc.key];
                 if (val === undefined || val === null || val === '') return null;
-                return parseFloat(String(val).replace(/[^0-9.\-]/g, '')) || null;
+                var num = parseFloat(String(val).replace(/[^0-9.\-]/g, '')) || null;
+                var mv = mc.max_value ? parseFloat(mc.max_value) : null;
+                if (num !== null && mv !== null && num > mv) return null;
+                return num;
             });
-            return {
-                label: mc.name + (mc.unit ? ' (' + mc.unit + ')' : ''),
-                data: values,
-                borderColor: palette[idx % palette.length],
-                backgroundColor: palette[idx % palette.length] + '15',
-                borderWidth: 2,
-                tension: 0.4,
-                pointRadius: 4,
-                pointHoverRadius: 6,
-                pointBackgroundColor: palette[idx % palette.length],
-                pointBorderColor: cv('--bg'),
-                pointBorderWidth: 2,
-                fill: false,
-                spanGaps: true
-            };
-        });
 
-        new Chart(canvas.getContext('2d'), {
-            type: 'line',
-            data: { labels: labels, datasets: datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                scales: {
-                    x: {
-                        grid: { color: cv('--grid-line'), drawBorder: false },
-                        ticks: { color: cv('--text-dim'), font: { size: 11 }, maxRotation: 45 }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: cv('--grid-line'), drawBorder: false },
-                        ticks: { color: cv('--text-dim'), font: { size: 11 } }
-                    }
+            var palette = ['#6366f1','#22c55e','#ef4444','#f59e0b','#06b6d4','#ec4899'];
+            var color = palette[metricsConfig.indexOf(mc) % palette.length];
+
+            new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: mc.name,
+                        data: values,
+                        borderColor: color,
+                        backgroundColor: color + '15',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: color,
+                        pointBorderColor: cv('--bg'),
+                        pointBorderWidth: 2,
+                        fill: true,
+                        spanGaps: true
+                    }]
                 },
-                plugins: {
-                    legend: {
-                        position: 'top',
-                        labels: { color: cv('--text-secondary'), usePointStyle: true, pointStyle: 'circle', padding: 16, font: { size: 12 } }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                interaction: { mode: 'nearest', intersect: false },
+                    scales: {
+                        x: {
+                            grid: { color: cv('--grid-line'), drawBorder: false },
+                            ticks: { color: cv('--text-dim'), font: { size: 10 }, maxRotation: 45 }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: mc.max_value ? parseFloat(mc.max_value) * 1.2 : null,
+                            grid: { color: cv('--grid-line'), drawBorder: false },
+                            ticks: { color: cv('--text-dim'), font: { size: 10 }, callback: function(v) { var mv = mc.max_value ? parseFloat(mc.max_value) : null; if (mv !== null && v > mv) return ''; return v; } }
+                        }
                     },
-                    tooltip: {
-                        backgroundColor: cv('--chart-tooltip-bg'),
-                        borderColor: cv('--chart-tooltip-border'),
-                        borderWidth: 1,
-                        titleColor: cv('--text-heading'),
-                        bodyColor: cv('--chart-tooltip-text'),
-                        padding: 12,
-                        cornerRadius: 10
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: cv('--chart-tooltip-bg'),
+                            borderColor: cv('--chart-tooltip-border'),
+                            borderWidth: 1,
+                            titleColor: cv('--text-heading'),
+                            bodyColor: cv('--chart-tooltip-text'),
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                title: function(items) { return items.length ? items[0].label : ''; },
+                                label: function(c) { return mc.name + ': ' + c.parsed.y + (mc.unit || ''); }
+                            }
+                        }
                     }
                 }
-            }
+            });
         });
     }
 

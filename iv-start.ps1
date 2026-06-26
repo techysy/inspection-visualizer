@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Action = "menu"
+    [string]$Action = "start"
 )
 
 $scriptPath = $PSScriptRoot
@@ -22,16 +22,16 @@ function Get-LanIP {
 function Show-Menu {
     Clear-Host
     Write-Host "======================================" -ForegroundColor Cyan
-    Write-Host "  Film Price Tracker" -ForegroundColor Green
+    Write-Host "  InspectionTracker" -ForegroundColor Green
     Write-Host "======================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  [S] Start Server (Foreground)" -ForegroundColor Gray
-    Write-Host "  [B] Start Server (Background)" -ForegroundColor Gray
+    Write-Host "  [S] Start Server" -ForegroundColor Gray
+    Write-Host "  [R] Restart Server" -ForegroundColor Gray
     Write-Host "  [T] Stop Server" -ForegroundColor Gray
     Write-Host "  [C] Check Status" -ForegroundColor Gray
     Write-Host "  [Q] Quit" -ForegroundColor Gray
     Write-Host ""
-    $choice = Read-Host "Enter option (S/B/T/C/Q)"
+    $choice = Read-Host "Enter option (S/R/T/C/Q)"
     return $choice.ToUpper()
 }
 
@@ -68,30 +68,26 @@ function Setup-Environment {
     }
 }
 
-function Start-Server([bool]$Background = $false) {
+function Stop-ExistingServer {
+    if (Test-Path $pidFile) {
+        $oldPid = (Get-Content $pidFile -Raw).Trim()
+        if ([int]::TryParse($oldPid, [ref]$null) -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
+            Write-Host "Stopping existing server (PID: $oldPid)..." -ForegroundColor Yellow
+            Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+        }
+        Remove-Item $pidFile -ErrorAction SilentlyContinue
+    }
+}
+
+function Start-Server {
     if (-not (Test-Python)) {
         Write-Host "Press any key to continue..."
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         return
     }
 
-    if (Test-Path $pidFile) {
-        $oldPid = (Get-Content $pidFile -Raw).Trim()
-        if ([int]::TryParse($oldPid, [ref]$null) -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
-            $lanIPs = Get-LanIP
-            Write-Host ""
-            Write-Host "Server already running (PID: $oldPid)" -ForegroundColor Yellow
-            Write-Host "Local:    http://localhost:$port" -ForegroundColor White
-            foreach ($ip in $lanIPs) {
-                Write-Host "Network:  http://$ip`:$port" -ForegroundColor White
-            }
-            Write-Host ""
-            Write-Host "Press any key to continue..."
-            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-            return
-        }
-        Remove-Item $pidFile -ErrorAction SilentlyContinue
-    }
+    Stop-ExistingServer
 
     Write-Host ""
     Setup-Environment
@@ -100,12 +96,7 @@ function Start-Server([bool]$Background = $false) {
     Write-Host ""
     Write-Host "Starting Flask server..." -ForegroundColor Yellow
 
-    if ($Background) {
-        $process = Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $scriptPath -WindowStyle Hidden -PassThru
-    } else {
-        $process = Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $scriptPath -NoNewWindow -PassThru
-    }
-
+    $process = Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $scriptPath -NoNewWindow -PassThru
     $process.Id | Out-File -FilePath $pidFile -Encoding UTF8
     Start-Sleep -Seconds 2
 
@@ -117,17 +108,10 @@ function Start-Server([bool]$Background = $false) {
             Write-Host "Network:  http://$ip`:$port" -ForegroundColor White
         }
         Write-Host ""
-        if ($Background) {
-            Write-Host "Running in background" -ForegroundColor Gray
-            Write-Host "Stop: .\start.ps1 -Action stop" -ForegroundColor Gray
-        } else {
-            Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
-        }
+        Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
         Write-Host ""
-        if (-not $Background) {
-            Write-Host "Press any key to exit..."
-            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        }
+        Write-Host "Press any key to exit menu..."
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     } else {
         Write-Host "Failed to start" -ForegroundColor Red
         Remove-Item $pidFile -ErrorAction SilentlyContinue
@@ -135,6 +119,49 @@ function Start-Server([bool]$Background = $false) {
         Write-Host "Press any key to continue..."
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     }
+}
+
+function Restart-Server {
+    Write-Host "======================================" -ForegroundColor Cyan
+    Write-Host "Restarting server..." -ForegroundColor Yellow
+    Write-Host "======================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    Stop-ExistingServer
+    Write-Host "Old server stopped" -ForegroundColor Green
+    Write-Host ""
+
+    if (-not (Test-Python)) {
+        Write-Host "Press any key to continue..."
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        return
+    }
+
+    Setup-Environment
+
+    $lanIPs = Get-LanIP
+    Write-Host ""
+    Write-Host "Starting Flask server..." -ForegroundColor Yellow
+
+    $process = Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $scriptPath -NoNewWindow -PassThru
+    $process.Id | Out-File -FilePath $pidFile -Encoding UTF8
+    Start-Sleep -Seconds 2
+
+    if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) {
+        Write-Host "Server restarted!" -ForegroundColor Green
+        Write-Host "PID: $($process.Id)" -ForegroundColor White
+        Write-Host "Local:    http://localhost:$port" -ForegroundColor White
+        foreach ($ip in $lanIPs) {
+            Write-Host "Network:  http://$ip`:$port" -ForegroundColor White
+        }
+    } else {
+        Write-Host "Failed to start" -ForegroundColor Red
+        Remove-Item $pidFile -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ""
+    Write-Host "Press any key to continue..."
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 }
 
 function Stop-Server {
@@ -211,7 +238,7 @@ function Run-Menu {
         $choice = Show-Menu
         switch ($choice) {
             "S" { Start-Server }
-            "B" { Start-Server -Background $true }
+            "R" { Restart-Server }
             "T" { Stop-Server }
             "C" { Get-Status }
             "Q" { Write-Host "Exiting..." -ForegroundColor Gray; exit }
@@ -224,17 +251,17 @@ function Run-Menu {
 }
 
 switch ($Action.ToLower()) {
-    "start"    { Start-Server }
-    "start-bg" { Start-Server -Background $true }
-    "stop"     { Stop-Server }
-    "status"   { Get-Status }
-    "menu"     { Run-Menu }
+    "start"   { Start-Server }
+    "restart" { Restart-Server }
+    "stop"    { Stop-Server }
+    "status"  { Get-Status }
+    "menu"    { Run-Menu }
     default {
         Write-Host "Usage:" -ForegroundColor Cyan
-        Write-Host "  .\start.ps1                  # Show menu" -ForegroundColor White
-        Write-Host "  .\start.ps1 -Action start    # Foreground" -ForegroundColor White
-        Write-Host "  .\start.ps1 -Action start-bg # Background" -ForegroundColor White
-        Write-Host "  .\start.ps1 -Action stop     # Stop" -ForegroundColor White
-        Write-Host "  .\start.ps1 -Action status   # Status" -ForegroundColor White
+        Write-Host "  .\iv-start.ps1                 # Start (default)" -ForegroundColor White
+        Write-Host "  .\iv-start.ps1 -Action restart # Restart" -ForegroundColor White
+        Write-Host "  .\iv-start.ps1 -Action stop    # Stop" -ForegroundColor White
+        Write-Host "  .\iv-start.ps1 -Action status  # Status" -ForegroundColor White
+        Write-Host "  .\iv-start.ps1 -Action menu    # Show menu" -ForegroundColor White
     }
 }

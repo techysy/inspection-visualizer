@@ -168,6 +168,9 @@
         let best = null, bestScore = 0;
         const name = (item.point_name || '').toLowerCase();
         const location = (item.location || '').toLowerCase();
+        const dashType = item.dashboard_type || '';
+        const typeMap = { 'monitor': '监控', 'vehicle': '车辆', 'badge': '工牌' };
+        const expectedType = typeMap[dashType] || '';
         for (const p of allPoints) {
             let score = 0;
             const pointName = (p.name || '').toLowerCase();
@@ -177,9 +180,12 @@
             else if (location && pLocation && location.includes(pLocation)) score += 20;
             else if (location && pLocation && pLocation.includes(location)) score += 15;
             if (location && pointName && location.includes(pointName)) score += 10;
+            if (location && pointName && pointName.includes(location)) score += 25;
             if (p.device_type) {
                 const dtype = p.device_type.toLowerCase();
                 if (name.includes(dtype)) score += 5;
+                if (expectedType && dtype === expectedType) score += 40;
+                if (expectedType && dtype !== expectedType) score -= 30;
             }
             if (score > bestScore) { bestScore = score; best = p; }
         }
@@ -210,6 +216,7 @@
                 ? '<span class="result-badge result-err">异常</span>'
                 : '<span class="result-badge result-warn">需关注</span>';
 
+            let locationBadge = matchedPoint && matchedPoint.location ? `<span class="location-badge">${escHtml(matchedPoint.location)}</span>` : '';
             let pointBadge;
             if (matchedPoint) {
                 pointBadge = `<span class="point-badge">${escHtml(matchedPoint.name)}</span>`;
@@ -219,9 +226,11 @@
                 const sorted = [...allPoints].sort((a, b) => {
                     const aLoc = (a.location || '').toLowerCase();
                     const bLoc = (b.location || '').toLowerCase();
-                    if (ocrLocation && aLoc && ocrLocation.includes(aLoc)) return -1;
-                    if (ocrLocation && bLoc && ocrLocation.includes(bLoc)) return 1;
-                    return 0;
+                    // 优先匹配 OCR 位置的对象
+                    if (ocrLocation && aLoc && ocrLocation.includes(aLoc) && !(ocrLocation.includes(bLoc))) return -1;
+                    if (ocrLocation && bLoc && ocrLocation.includes(bLoc) && !(ocrLocation.includes(aLoc))) return 1;
+                    // 按名称排序
+                    return (a.name || '').localeCompare(b.name || '');
                 });
                 sorted.forEach(p => {
                     const selected = ocrLocation && p.location && ocrLocation.includes((p.location || '').toLowerCase()) ? ' selected' : '';
@@ -245,6 +254,7 @@
 
             html += `<div class="ocr-card">
                 <div class="ocr-card-header">
+                    ${locationBadge}
                     <input type="text" class="ocr-title-input" value="${escAttr(item.point_name)}" onchange="currentItems[${i}].point_name=this.value;">
                     <div class="ocr-card-actions">${pointBadge}<button class="ocr-del-btn" onclick="removeItem(${i})">&#10005;</button></div>
                 </div>
@@ -373,6 +383,17 @@
     align-items: center;
     gap: 0.4rem;
     flex-shrink: 0;
+}
+.location-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+    background: rgba(99,102,241,0.12);
+    color: #6366f1;
+    border: 1px solid rgba(99,102,241,0.25);
+    white-space: nowrap;
 }
 .point-badge {
     display: inline-block;

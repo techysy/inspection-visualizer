@@ -36,8 +36,13 @@ class ObjectMetric(Base):
     key = Column(String(50), nullable=False)       # 指标键名，如 onlinerate
     name = Column(String(50), nullable=False)      # 显示名称，如 在线率
     unit = Column(String(20), default='')           # 单位，如 %
+    max_value = Column(Float, default=100)          # 图表Y轴最大值，百分比默认100
     show_in_chart = Column(Boolean, default=True)   # 是否参与可视化
     sort_order = Column(Integer, default=0)         # 排序
+    # 阈值设置
+    warn_threshold = Column(Float, nullable=True)   # 需关注阈值（为空则不启用）
+    error_threshold = Column(Float, nullable=True)  # 异常阈值（为空则不启用）
+    threshold_direction = Column(String(2), default='lt')  # lt=小于触发, gt=大于触发
 
     inspection_object = relationship('InspectionObject', back_populates='metrics')
 
@@ -112,6 +117,7 @@ def init_db():
             'key': 'VARCHAR(50) NOT NULL',
             'name': 'VARCHAR(50) NOT NULL',
             'unit': 'VARCHAR(20) DEFAULT \'\'',
+            'max_value': 'FLOAT DEFAULT 100',
             'show_in_chart': 'BOOLEAN DEFAULT 1',
             'sort_order': 'INTEGER DEFAULT 0',
         },
