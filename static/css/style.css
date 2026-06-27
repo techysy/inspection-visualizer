@@ -232,7 +232,7 @@ h5.card-title::before {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: 16px;
-    transition: all 0.3s ease;
+    transition: border-color 0.3s, background 0.3s;
 }
 
 .card:hover {
@@ -338,7 +338,7 @@ h5.card-title::before {
     color: var(--text);
     padding: 0.6rem 1rem;
     font-size: 0.875rem;
-    transition: all 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .form-control:focus {
@@ -346,6 +346,7 @@ h5.card-title::before {
     border-color: var(--border-input-focus);
     box-shadow: 0 0 0 3px var(--primary-glow);
     color: var(--text-heading);
+    outline: 0;
 }
 
 .form-control::placeholder { color: var(--text-faint); }

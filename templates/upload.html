@@ -221,22 +221,33 @@
             if (matchedPoint) {
                 pointBadge = `<span class="point-badge">${escHtml(matchedPoint.name)}</span>`;
             } else {
-                let opts = '<option value="">选择位置</option>';
+                let opts = '<option value="">选择对象</option>';
+                const ocrName = (item.point_name || '').toLowerCase();
                 const ocrLocation = (item.location || '').toLowerCase();
                 const sorted = [...allPoints].sort((a, b) => {
+                    const aName = (a.name || '').toLowerCase();
+                    const bName = (b.name || '').toLowerCase();
                     const aLoc = (a.location || '').toLowerCase();
                     const bLoc = (b.location || '').toLowerCase();
-                    // 优先匹配 OCR 位置的对象
+                    if (ocrName && aName && ocrName.includes(aName) && !(ocrName.includes(bName))) return -1;
+                    if (ocrName && bName && ocrName.includes(bName) && !(ocrName.includes(aName))) return 1;
                     if (ocrLocation && aLoc && ocrLocation.includes(aLoc) && !(ocrLocation.includes(bLoc))) return -1;
                     if (ocrLocation && bLoc && ocrLocation.includes(bLoc) && !(ocrLocation.includes(aLoc))) return 1;
-                    // 按名称排序
                     return (a.name || '').localeCompare(b.name || '');
                 });
+                let autoSelectedId = null;
                 sorted.forEach(p => {
-                    const selected = ocrLocation && p.location && ocrLocation.includes((p.location || '').toLowerCase()) ? ' selected' : '';
+                    const isAutoSelected = (ocrName && p.name && ocrName.includes((p.name || '').toLowerCase())) ||
+                                           (ocrLocation && p.location && ocrLocation.includes((p.location || '').toLowerCase()));
+                    const selected = isAutoSelected ? ' selected' : '';
+                    if (isAutoSelected) autoSelectedId = p.id;
                     opts += `<option value="${p.id}"${selected}>${escHtml(p.name)} ${p.location ? '(' + escHtml(p.location) + ')' : ''}</option>`;
                 });
-                pointBadge = `<select class="point-select" onchange="currentItems[${i}].point_id=this.value||null; this.className=this.value?'point-select point-ok':'point-select point-err';">${opts}</select>`;
+                if (autoSelectedId) item.point_id = autoSelectedId;
+                pointBadge = `<div class="point-select-group">
+                    <select class="point-select" onchange="currentItems[${i}].point_id=this.value||null; this.className=this.value?'point-select point-ok':'point-select point-err';">${opts}</select>
+                    <button class="quick-create-btn" onclick="quickCreateObject(${i})" title="快速创建巡检对象">+</button>
+                </div>`;
             }
 
             let inspectorBadge;
@@ -288,6 +299,83 @@
         } else {
             renderItems(currentItems);
         }
+    };
+
+    window.quickCreateObject = function(idx) {
+        const item = currentItems[idx];
+        const suggestedName = item.point_name || '';
+        const suggestedLocation = item.location || '';
+
+        const modal = document.createElement('div');
+        modal.className = 'quick-create-modal';
+        modal.innerHTML = `
+            <div class="quick-create-dialog">
+                <h5>快速创建巡检对象</h5>
+                <div class="mb-3">
+                    <label class="form-label">名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="qc-name" value="${escAttr(suggestedName)}" placeholder="输入巡检对象名称">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">位置</label>
+                    <input type="text" class="form-control" id="qc-location" value="${escAttr(suggestedLocation)}" placeholder="输入位置（可选）">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">设备类型</label>
+                    <select class="form-select" id="qc-device-type">
+                        <option value="">无</option>
+                        <option value="监控">监控</option>
+                        <option value="服务器">服务器</option>
+                        <option value="网络设备">网络设备</option>
+                        <option value="存储">存储</option>
+                        <option value="UPS">UPS</option>
+                        <option value="空调">空调</option>
+                    </select>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary flex-fill" id="qc-confirm">创建并关联</button>
+                    <button class="btn btn-outline-secondary" id="qc-cancel">取消</button>
+                </div>
+                <div id="qc-status" class="mt-2"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector('#qc-cancel').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+        modal.querySelector('#qc-confirm').addEventListener('click', async () => {
+            const name = modal.querySelector('#qc-name').value.trim();
+            if (!name) {
+                modal.querySelector('#qc-status').innerHTML = '<div class="text-danger">名称不能为空</div>';
+                return;
+            }
+            const statusEl = modal.querySelector('#qc-status');
+            statusEl.innerHTML = '<div class="text-info">创建中...</div>';
+
+            try {
+                const resp = await fetch('/api/objects/quick-create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        name: name,
+                        location: modal.querySelector('#qc-location').value.trim(),
+                        device_type: modal.querySelector('#qc-device-type').value
+                    })
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    statusEl.innerHTML = `<div class="text-danger">${data.error}</div>`;
+                    return;
+                }
+                allPoints.push({id: data.id, name: data.name, location: modal.querySelector('#qc-location').value.trim()});
+                currentItems[idx].point_id = data.id;
+                modal.remove();
+                renderItems(currentItems);
+                ocrStatus.innerHTML = `<div class="alert alert-success">已创建对象 "${escHtml(data.name)}" 并关联</div>`;
+            } catch(e) {
+                statusEl.innerHTML = `<div class="text-danger">创建失败: ${e.message}</div>`;
+            }
+        });
     };
 
     btnSave.addEventListener('click', async () => {
@@ -509,6 +597,56 @@
     font-size: 0.72rem;
     color: var(--text-secondary);
     white-space: nowrap;
+}
+.point-select-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.quick-create-btn {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--border-input);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    padding: 0;
+    line-height: 1;
+}
+.quick-create-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.quick-create-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 1rem;
+}
+.quick-create-dialog {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.quick-create-dialog h5 {
+    margin-bottom: 1rem;
+    font-weight: 600;
 }
 </style>
 {% endblock %}

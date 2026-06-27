@@ -108,10 +108,9 @@ function Start-Server {
             Write-Host "Network:  http://$ip`:$port" -ForegroundColor White
         }
         Write-Host ""
-        Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "Press any key to exit menu..."
+        Write-Host "Press any key to open menu..." -ForegroundColor Gray
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        Run-Menu
     } else {
         Write-Host "Failed to start" -ForegroundColor Red
         Remove-Item $pidFile -ErrorAction SilentlyContinue
@@ -154,6 +153,10 @@ function Restart-Server {
         foreach ($ip in $lanIPs) {
             Write-Host "Network:  http://$ip`:$port" -ForegroundColor White
         }
+        Write-Host ""
+        Write-Host "Press any key to open menu..." -ForegroundColor Gray
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        Run-Menu
     } else {
         Write-Host "Failed to start" -ForegroundColor Red
         Remove-Item $pidFile -ErrorAction SilentlyContinue

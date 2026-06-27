@@ -9,11 +9,99 @@ from flask import Blueprint, render_template, jsonify, request, redirect, url_fo
 from PIL import Image
 from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector, ObjectMetric
 
-try:
-    from rapidocr_onnxruntime import RapidOCR
-    ocr_engine = RapidOCR()
-except ImportError:
-    ocr_engine = None
+OCR_CONFIG_PATH = Path(__file__).parent / 'ocr_config.json'
+DASHBOARD_TYPES_PATH = Path(__file__).parent / 'dashboard_types.json'
+
+_default_ocr_config = {
+    "text_score": 0.5,
+    "use_det": True,
+    "use_cls": True,
+    "use_rec": True,
+    "min_height": 30,
+    "max_side_len": 2000,
+    "ignore_top": 0,
+    "ignore_bottom": 0,
+}
+
+
+def _load_ocr_config():
+    if OCR_CONFIG_PATH.exists():
+        try:
+            with open(OCR_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return _default_ocr_config.copy()
+
+
+def _build_ocr_engine(config=None):
+    if config is None:
+        config = _load_ocr_config()
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+        kwargs = {}
+        if 'text_score' in config:
+            kwargs['text_score'] = config['text_score']
+        if 'use_det' in config:
+            kwargs['use_det'] = config['use_det']
+        if 'use_cls' in config:
+            kwargs['use_cls'] = config['use_cls']
+        if 'use_rec' in config:
+            kwargs['use_rec'] = config['use_rec']
+        return RapidOCR(**kwargs)
+    except ImportError:
+        return None
+
+
+ocr_engine = _build_ocr_engine()
+
+
+def _load_dashboard_types():
+    if DASHBOARD_TYPES_PATH.exists():
+        try:
+            with open(DASHBOARD_TYPES_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('types', [])
+        except Exception:
+            pass
+    return []
+
+
+def _save_dashboard_types(types_list):
+    with open(DASHBOARD_TYPES_PATH, 'w', encoding='utf-8') as f:
+        json.dump({'types': types_list}, f, ensure_ascii=False, indent=2)
+
+
+def _sync_dashboard_type_from_object(obj, metrics):
+    """根据巡检对象及其指标自动创建/更新仪表盘类型"""
+    types_list = _load_dashboard_types()
+    type_id = f'obj_{obj.id}'
+
+    existing = next((t for t in types_list if t['id'] == type_id), None)
+
+    labels = {}
+    for m in metrics:
+        labels[m.name] = m.key
+
+    type_data = {
+        'id': type_id,
+        'name': obj.name,
+        'description': obj.description or f'{obj.name} 仪表盘',
+        'detect_keywords': [obj.name],
+        'labels': labels,
+        'extra_labels': [],
+        'result_rules': {},
+        'number_before_label': False,
+    }
+
+    if existing:
+        existing.update(type_data)
+    else:
+        types_list.append(type_data)
+
+    _save_dashboard_types(types_list)
+    return type_data
+
 
 main = Blueprint('main', __name__)
 
@@ -172,42 +260,28 @@ def parse_inspection_form(ocr_result):
 
 
 def parse_dashboard_screenshot(all_text, lines):
-    """解析仪表盘截图（支持监控、车辆、工牌三种类型）"""
+    """解析仪表盘截图（使用可配置的仪表盘类型规则）"""
+    print(f'  PARSE: all_text={repr(all_text)}')
+
+    dashboard_types = _load_dashboard_types()
+    matched_type = None
+
+    for dtype in dashboard_types:
+        keywords = dtype.get('detect_keywords', [])
+        if any(kw in all_text for kw in keywords):
+            matched_type = dtype
+            print(f'  PARSE: 检测到{dtype["name"]}仪表盘 (关键词: {keywords})')
+            break
+
+    if not matched_type:
+        print('  PARSE: 未匹配到任何仪表盘类型')
+        return None
+
+    label_map = matched_type.get('labels', {})
+    number_before_label = matched_type.get('number_before_label', False)
     region_name = ''
     online_rate = ''
     metrics = {}
-
-    # 检测仪表盘类型（用具体标签判断，避免"车辆"等词误匹配）
-    is_vehicle = '全部车辆' in all_text or '车辆总数' in all_text or '在线车辆' in all_text or '报警车辆' in all_text
-    is_badge = '工牌' in all_text or '账户设备' in all_text or ('未用' in all_text and '在线' in all_text)
-    is_monitor = '监控点总数' in all_text or '监控点在线率' in all_text
-    print(f'  PARSE: all_text={repr(all_text)}')
-
-    # 定义标签映射
-    if is_vehicle:
-        label_map = {
-            '车辆总数': 'total',
-            '在线车辆': 'online',
-            '今日上线': 'today_online',
-            '报警车辆': 'alarm',
-        }
-        print('  PARSE: 检测到车辆仪表盘')
-    elif is_badge:
-        label_map = {
-            '全部': 'total',
-            '在线': 'online',
-            '离线': 'offline',
-            '未用': 'unused',
-        }
-        print('  PARSE: 检测到工牌仪表盘')
-    else:
-        label_map = {
-            '监控点总数': 'total',
-            '在线': 'online',
-            '离线': 'offline',
-            '未检测': 'undetected',
-        }
-        print('  PARSE: 检测到监控仪表盘')
 
     # 逐行匹配（使用队列处理连续标签无数字的情况）
     pending_labels = []
@@ -224,8 +298,7 @@ def parse_dashboard_screenshot(all_text, lines):
             print(f'  PARSE: 纯数字 {num} -> {label}')
             continue
 
-        # 2) 车辆/工牌：匹配 "位置名（在线/总数）" 格式
-        # 例如：中江县综合行政执法局（49/89）
+        # 2) 匹配 "位置名（在线/总数）" 格式
         m = re.match(r'^(.+?)\s*[（(]\s*(\d+)\s*/\s*(\d+)\s*[）)]$', line)
         if m:
             region_name = m.group(1).strip()
@@ -241,15 +314,15 @@ def parse_dashboard_screenshot(all_text, lines):
         matched_label = None
         matched_val = None
 
-        # 按标签长度降序排列，优先匹配长标签
         sorted_labels = sorted(label_map.keys(), key=len, reverse=True)
         for label in sorted_labels:
-            # 匹配 "标签数字" 或 "标签 数字" 或 "标签 (数字)"
             patterns = [
-                rf'^{re.escape(label)}\s*\((\d+)\)$',   # 标签 (数字)
-                rf'^{re.escape(label)}\s*(\d+)$',        # 标签数字 或 标签 数字
-                rf'^{re.escape(label)}$',                 # 仅标签（等待下一行数字）
+                rf'^{re.escape(label)}\s*\((\d+)\)$',
+                rf'^{re.escape(label)}\s*(\d+)$',
+                rf'^{re.escape(label)}$',
             ]
+            if number_before_label:
+                patterns.insert(0, rf'^(\d+)\s*{re.escape(label)}$')
             for pattern in patterns:
                 m = re.match(pattern, line)
                 if m:
@@ -270,41 +343,40 @@ def parse_dashboard_screenshot(all_text, lines):
 
         pending_labels = []
 
-    # 识别在线率百分比（仅监控仪表盘）
-    if not is_vehicle and not is_badge:
+    # 识别在线率百分比（如果有 extra_labels 包含"在线率"）
+    extra_labels = matched_type.get('extra_labels', [])
+    if '在线率' in extra_labels:
         rate_match = re.search(r'(\d{1,3}\.\d{1,2})%', all_text)
         if rate_match:
             online_rate = rate_match.group(0)
 
-    # 交叉校验：用在线率修正OCR错位的数值（在总数推算之前）
-    if not is_vehicle and not is_badge and online_rate:
+    # 交叉校验：用在线率修正OCR错位的数值
+    if online_rate:
         rate_val = float(online_rate.replace('%', ''))
         known_total = metrics.get('total', 0)
         known_online = metrics.get('online', 0)
         known_offline = metrics.get('offline', 0)
         known_undetected = metrics.get('undetected', 0)
-        # 如果有总数，用在线率反算在线和离线
         if known_total > 0:
             expected_online = round(known_total * rate_val / 100)
             expected_offline = max(0, known_total - expected_online - known_undetected)
-            print(f'  PARSE: 交叉校验 online {known_online}->{expected_online}, offline {known_offline}->{expected_offline} (总数{known_total}, 在线率{online_rate})')
+            print(f'  PARSE: 交叉校验 online {known_online}->{expected_online}, offline {known_offline}->{expected_offline}')
             metrics['online'] = expected_online
             metrics['offline'] = expected_offline
-        # 如果没有总数但有在线和离线，且在线率=100%，修正离线=0
         elif known_online > 0 and rate_val == 100.0 and known_offline > 0:
             print(f'  PARSE: 在线率100%, 修正 offline {known_offline}->0')
             metrics['offline'] = 0
 
-    # 识别区域名称（如果尚未从位置格式中提取到）
+    # 识别区域名称
     if not region_name:
         region_name = _extract_location_from_lines(lines)
     region_name = normalize_location(region_name)
 
-    # 从OCR文本中提取截图日期（仅用于日期部分，时间使用识别时间）
+    # 从OCR文本中提取截图日期
     screenshot_date = None
     time_patterns = [
-        r'(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})',  # 2026.06.26 / 2026-06-26 / 2026/06/26
-        r'(\d{4})年(\d{1,2})月(\d{1,2})日',            # 2026年06月26日
+        r'(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})',
+        r'(\d{4})年(\d{1,2})月(\d{1,2})日',
     ]
     for tp in time_patterns:
         tm = re.search(tp, all_text)
@@ -318,47 +390,58 @@ def parse_dashboard_screenshot(all_text, lines):
             except (ValueError, IndexError):
                 pass
 
-    # 必须至少识别到一个指标才算有效
     if not metrics:
         return None
 
     # 构建状态详情
-    label_names = {v: k for k, v in label_map.items()}
+    reverse_label_map = {v: k for k, v in label_map.items()}
     status_detail_parts = []
     for key, val in metrics.items():
-        label_name = label_names.get(key, key)
+        label_name = reverse_label_map.get(key, key)
         status_detail_parts.append(f'{label_name}: {val}')
     if online_rate:
         status_detail_parts.append(f'在线率: {online_rate}')
 
-    # 判断整体状态
+    # 根据 result_rules 判断整体状态
     result = '正常'
-    if is_vehicle:
-        alarm = metrics.get('alarm', 0)
-        if alarm > 0:
-            result = '异常'
-    elif is_badge:
-        offline = metrics.get('offline', 0)
-        if offline > 0:
-            result = '异常'
-    else:
-        offline = metrics.get('offline', 0)
-        if offline > 0:
-            result = '异常'
-        if online_rate:
-            rate_value = float(online_rate.replace('%', ''))
-            if rate_value < 90:
-                result = '异常'
-            elif rate_value < 95:
-                result = '需关注'
+    result_rules = matched_type.get('result_rules', {})
+    for rule, outcome in result_rules.items():
+        m = re.match(r'^(\w+)([><=]+)([\d.]+)$', rule)
+        if not m:
+            continue
+        metric_key, op, threshold = m.group(1), m.group(2), float(m.group(3))
+        val = metrics.get(metric_key, 0)
+        if op == '>' and val > threshold:
+            result = outcome
+            break
+        elif op == '<' and val < threshold:
+            result = outcome
+            break
+        elif op == '>=' and val >= threshold:
+            result = outcome
+            break
+        elif op == '<=' and val <= threshold:
+            result = outcome
+            break
+
+    # 在线率特殊处理
+    if online_rate and 'online_rate' in str(result_rules):
+        rate_value = float(online_rate.replace('%', ''))
+        for rule, outcome in result_rules.items():
+            m = re.match(r'^online_rate([><=]+)([\d.]+)$', rule)
+            if not m:
+                continue
+            op, threshold = m.group(1), float(m.group(2))
+            if op == '<' and rate_value < threshold:
+                result = outcome
+                break
+            elif op == '<=' and rate_value <= threshold:
+                result = outcome
+                break
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
     timestamp = f'{screenshot_date} {now.split(" ")[1]}' if screenshot_date else now
-    dashboard_type = 'monitor'
-    if is_vehicle:
-        dashboard_type = 'vehicle'
-    elif is_badge:
-        dashboard_type = 'badge'
+
     return {
         'point_name': '',
         'location': region_name,
@@ -368,7 +451,8 @@ def parse_dashboard_screenshot(all_text, lines):
         'inspector': '',
         'timestamp': timestamp,
         'is_dashboard': True,
-        'dashboard_type': dashboard_type,
+        'dashboard_type': matched_type['id'],
+        'dashboard_type_name': matched_type['name'],
     }
 
 
@@ -1207,9 +1291,17 @@ def api_ocr():
     if ',' in image_data:
         image_data = image_data.split(',', 1)[1]
 
+    config = _load_ocr_config()
+    ignore_top = config.get('ignore_top', 0)
+    ignore_bottom = config.get('ignore_bottom', 0)
+
     try:
         image_bytes = base64.b64decode(image_data)
         img = Image.open(io.BytesIO(image_bytes))
+        img_height = img.height
+        top_cutoff = int(img_height * ignore_top / 100) if ignore_top > 0 else 0
+        bottom_cutoff = img_height - int(img_height * ignore_bottom / 100) if ignore_bottom > 0 else img_height
+
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             img.save(tmp.name)
             tmp_path = tmp.name
@@ -1218,8 +1310,346 @@ def api_ocr():
     except Exception as e:
         return jsonify({'error': f'图片处理失败: {str(e)}'}), 400
 
-    items = parse_inspection_form(result)
-    return jsonify({'items': items, 'raw_lines': [item[1] for item in (result or []) if item]})
+    filtered_result = []
+    for item in (result or []):
+        if item and len(item) >= 2:
+            bbox = item[0]
+            if bbox and len(bbox) >= 4:
+                y_center = (bbox[0][1] + bbox[2][1]) / 2
+                if y_center < top_cutoff or y_center > bottom_cutoff:
+                    continue
+            filtered_result.append(item)
+
+    items = parse_inspection_form(filtered_result)
+    return jsonify({'items': items, 'raw_lines': [item[1] for item in filtered_result if item]})
+
+
+@main.route('/ocr-admin')
+def ocr_admin():
+    """OCR 管理页面（隐藏）"""
+    config = _load_ocr_config()
+    engine_status = 'running' if ocr_engine else 'not_installed'
+    return render_template('ocr_admin.html', config=config, engine_status=engine_status)
+
+
+@main.route('/api/ocr-config', methods=['GET'])
+def api_ocr_config_get():
+    """获取当前 OCR 配置"""
+    return jsonify(_load_ocr_config())
+
+
+@main.route('/api/ocr-config', methods=['POST'])
+def api_ocr_config_apply():
+    """实时应用 OCR 配置（不持久化）"""
+    global ocr_engine
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请提供配置数据'}), 400
+
+    config = _load_ocr_config()
+    config.update(data)
+
+    new_engine = _build_ocr_engine(config)
+    if new_engine is None:
+        return jsonify({'error': 'OCR 引擎未安装，请运行: pip install rapidocr-onnxruntime'}), 500
+
+    ocr_engine = new_engine
+    return jsonify({'ok': True, 'config': config})
+
+
+@main.route('/api/ocr-config/save', methods=['POST'])
+def api_ocr_config_save():
+    """保存 OCR 配置到文件"""
+    global ocr_engine
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请提供配置数据'}), 400
+
+    config = _load_ocr_config()
+    config.update(data)
+
+    try:
+        with open(OCR_CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({'error': f'保存失败: {str(e)}'}), 500
+
+    new_engine = _build_ocr_engine(config)
+    if new_engine is not None:
+        ocr_engine = new_engine
+
+    return jsonify({'ok': True, 'config': config})
+
+
+@main.route('/api/dashboard-types', methods=['GET'])
+def api_dashboard_types_list():
+    """获取所有仪表盘类型"""
+    return jsonify(_load_dashboard_types())
+
+
+@main.route('/api/dashboard-types', methods=['POST'])
+def api_dashboard_types_add():
+    """添加仪表盘类型"""
+    data = request.get_json()
+    if not data or not data.get('name', '').strip():
+        return jsonify({'error': '类型名称不能为空'}), 400
+
+    types_list = _load_dashboard_types()
+    new_id = data.get('id', '').strip() or re.sub(r'[^a-z0-9_]', '', data['name'].lower().replace(' ', '_')) or f'type_{int(__import__("time").time() * 1000)}'
+
+    if not new_id:
+        return jsonify({'error': '类型ID不能为空'}), 400
+
+    if any(t['id'] == new_id for t in types_list):
+        return jsonify({'error': f'ID "{new_id}" 已存在'}), 409
+
+    new_type = {
+        'id': new_id,
+        'name': data['name'].strip(),
+        'description': data.get('description', '').strip(),
+        'detect_keywords': data.get('detect_keywords', []),
+        'labels': data.get('labels', {}),
+        'extra_labels': data.get('extra_labels', []),
+        'result_rules': data.get('result_rules', {}),
+    }
+    types_list.append(new_type)
+    _save_dashboard_types(types_list)
+    return jsonify({'ok': True, 'type': new_type})
+
+
+@main.route('/api/dashboard-types/<type_id>', methods=['PUT'])
+def api_dashboard_types_update(type_id):
+    """更新仪表盘类型"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请提供数据'}), 400
+
+    types_list = _load_dashboard_types()
+    for i, t in enumerate(types_list):
+        if t['id'] == type_id:
+            types_list[i].update({
+                'name': data.get('name', t['name']),
+                'description': data.get('description', t['description']),
+                'detect_keywords': data.get('detect_keywords', t['detect_keywords']),
+                'labels': data.get('labels', t['labels']),
+                'extra_labels': data.get('extra_labels', t.get('extra_labels', [])),
+                'result_rules': data.get('result_rules', t.get('result_rules', {})),
+                'number_before_label': data.get('number_before_label', t.get('number_before_label', False)),
+            })
+            _save_dashboard_types(types_list)
+            return jsonify({'ok': True, 'type': types_list[i]})
+
+    return jsonify({'error': f'类型 "{type_id}" 不存在'}), 404
+
+
+@main.route('/api/dashboard-types/<type_id>', methods=['DELETE'])
+def api_dashboard_types_delete(type_id):
+    """删除仪表盘类型"""
+    types_list = _load_dashboard_types()
+    new_list = [t for t in types_list if t['id'] != type_id]
+    if len(new_list) == len(types_list):
+        return jsonify({'error': f'类型 "{type_id}" 不存在'}), 404
+    _save_dashboard_types(new_list)
+    return jsonify({'ok': True})
+
+
+@main.route('/api/dashboard-types/sync', methods=['POST'])
+def api_dashboard_types_sync():
+    """从巡检对象同步指标到仪表盘类型"""
+    session = SessionLocal()
+    try:
+        objects = session.query(InspectionObject).filter_by(status='active').all()
+        types_list = _load_dashboard_types()
+        updated = 0
+        created = 0
+
+        for obj in objects:
+            metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+            if not metrics:
+                continue
+
+            labels = {}
+            for m in metrics:
+                labels[m.name] = m.key
+
+            # 查找已存在的仪表盘类型（按 obj_X id 或 名称匹配）
+            type_id = f'obj_{obj.id}'
+            existing = next((t for t in types_list if t['id'] == type_id), None)
+            if not existing:
+                existing = next((t for t in types_list if t['name'] == obj.name), None)
+
+            if existing:
+                if existing.get('labels') != labels:
+                    existing['labels'] = labels
+                    existing['detect_keywords'] = list(set(existing.get('detect_keywords', []) + [obj.name]))
+                    updated += 1
+            else:
+                types_list.append({
+                    'id': type_id,
+                    'name': obj.name,
+                    'description': obj.description or f'{obj.name} 仪表盘',
+                    'detect_keywords': [obj.name],
+                    'labels': labels,
+                    'extra_labels': [],
+                    'result_rules': {},
+                    'number_before_label': False,
+                })
+                created += 1
+
+        _save_dashboard_types(types_list)
+        return jsonify({'ok': True, 'created': created, 'updated': updated, 'total_objects': len(objects)})
+    finally:
+        session.close()
+
+
+@main.route('/api/dashboard-types/<type_id>/sync', methods=['POST'])
+def api_dashboard_type_sync_single(type_id):
+    """从巡检对象同步指标到指定仪表盘类型"""
+    session = SessionLocal()
+    try:
+        types_list = _load_dashboard_types()
+        target = next((t for t in types_list if t['id'] == type_id), None)
+        if not target:
+            return jsonify({'error': f'类型 "{type_id}" 不存在'}), 404
+
+        # 通过 id (obj_X) 或名称匹配巡检对象
+        obj = None
+        if type_id.startswith('obj_'):
+            try:
+                obj_id = int(type_id[4:])
+                obj = session.query(InspectionObject).filter_by(id=obj_id, status='active').first()
+            except (ValueError, IndexError):
+                pass
+        if not obj:
+            obj = session.query(InspectionObject).filter_by(name=target['name'], status='active').first()
+        if not obj:
+            return jsonify({'error': '未找到对应的巡检对象，请先在对象管理中创建'}), 404
+
+        metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+        if not metrics:
+            return jsonify({'error': f'巡检对象 "{obj.name}" 没有配置指标'}), 400
+
+        labels = {m.name: m.key for m in metrics}
+        target['labels'] = labels
+        target['detect_keywords'] = list(set(target.get('detect_keywords', []) + [obj.name]))
+        _save_dashboard_types(types_list)
+        return jsonify({'ok': True, 'updated_labels': labels})
+    finally:
+        session.close()
+
+
+@main.route('/api/ocr/model-info', methods=['GET'])
+def api_ocr_model_info():
+    """获取当前 OCR 模型信息"""
+    info = {
+        'installed': ocr_engine is not None,
+        'engine': 'RapidOCR (ONNX Runtime)',
+        'version': None,
+        'models': {},
+    }
+    if ocr_engine is not None:
+        try:
+            import rapidocr_onnxruntime
+            info['version'] = getattr(rapidocr_onnxruntime, '__version__', None)
+        except Exception:
+            pass
+        try:
+            det_cls_rec = getattr(ocr_engine, 'det_cls_rec', None)
+            if det_cls_rec:
+                det_model, cls_model, rec_model = det_cls_rec
+                info['models'] = {
+                    'detection': getattr(det_model, 'model_path', None) or str(getattr(det_model, 'model', '')),
+                    'classification': getattr(cls_model, 'model_path', None) or str(getattr(cls_model, 'model', '')),
+                    'recognition': getattr(rec_model, 'model_path', None) or str(getattr(rec_model, 'model', '')),
+                }
+        except Exception:
+            pass
+        try:
+            textdet = getattr(ocr_engine, 'textdet', None)
+            if textdet:
+                info['models']['detection'] = getattr(getattr(textdet, 'model', None), 'model_path', None) or info['models'].get('detection', '')
+            textrec = getattr(ocr_engine, 'textrec', None)
+            if textrec:
+                info['models']['recognition'] = getattr(getattr(textrec, 'model', None), 'model_path', None) or info['models'].get('recognition', '')
+        except Exception:
+            pass
+    return jsonify(info)
+
+
+@main.route('/api/objects/quick-create', methods=['POST'])
+def api_quick_create_object():
+    """快速创建巡检对象（JSON API）"""
+    data = request.get_json()
+    if not data or not data.get('name', '').strip():
+        return jsonify({'error': '名称不能为空'}), 400
+
+    name = data['name'].strip()
+    location = data.get('location', '').strip() or None
+    device_type = data.get('device_type', '').strip() or None
+    description = data.get('description', '').strip() or None
+
+    session = SessionLocal()
+    try:
+        existing = session.query(InspectionObject).filter_by(name=name, status='active').first()
+        if existing:
+            return jsonify({'error': f'对象 "{name}" 已存在', 'id': existing.id}), 409
+
+        obj = InspectionObject(name=name, location=location, device_type=device_type, description=description)
+        session.add(obj)
+        session.commit()
+        return jsonify({'ok': True, 'id': obj.id, 'name': obj.name})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': f'创建失败: {str(e)}'}), 500
+    finally:
+        session.close()
+
+
+@main.route('/api/ocr/test', methods=['POST'])
+def api_ocr_test():
+    """用当前配置测试 OCR 识别"""
+    if not ocr_engine:
+        return jsonify({'error': 'OCR 引擎未安装，请运行: pip install rapidocr-onnxruntime'}), 500
+
+    data = request.get_json()
+    if not data or 'image' not in data:
+        return jsonify({'error': '请提供图片数据'}), 400
+
+    image_data = data['image']
+    if ',' in image_data:
+        image_data = image_data.split(',', 1)[1]
+
+    config = _load_ocr_config()
+    ignore_top = config.get('ignore_top', 0)
+    ignore_bottom = config.get('ignore_bottom', 0)
+
+    try:
+        image_bytes = base64.b64decode(image_data)
+        img = Image.open(io.BytesIO(image_bytes))
+        img_height = img.height
+        top_cutoff = int(img_height * ignore_top / 100) if ignore_top > 0 else 0
+        bottom_cutoff = img_height - int(img_height * ignore_bottom / 100) if ignore_bottom > 0 else img_height
+
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            img.save(tmp.name)
+            tmp_path = tmp.name
+        result, _ = ocr_engine(tmp_path)
+        Path(tmp_path).unlink(missing_ok=True)
+    except Exception as e:
+        return jsonify({'error': f'图片处理失败: {str(e)}'}), 400
+
+    filtered_result = []
+    for item in (result or []):
+        if item and len(item) >= 2:
+            bbox = item[0]
+            if bbox and len(bbox) >= 4:
+                y_center = (bbox[0][1] + bbox[2][1]) / 2
+                if y_center < top_cutoff or y_center > bottom_cutoff:
+                    continue
+            filtered_result.append(item)
+
+    raw_lines = [item[1] for item in filtered_result if item]
+    return jsonify({'raw_lines': raw_lines, 'config': config})
 
 
 @main.route('/api/save', methods=['POST'])

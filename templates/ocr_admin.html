@@ -1,0 +1,832 @@
+{% extends "base.html" %}
+
+{% block title %}OCR 管理 - 巡检数据可视化{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">OCR 识别模型管理</h1>
+
+<div class="row g-4">
+    <!-- 左列：仪表盘类型 + 识别参数 -->
+    <div class="col-lg-7">
+        <!-- 仪表盘类型（主要区域） -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="card-title mb-0">仪表盘类型</h5>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-primary" id="btn-sync-types" title="从巡检对象同步指标">同步指标</button>
+                        <button class="btn btn-sm btn-primary" id="btn-add-type">+ 新建</button>
+                    </div>
+                </div>
+                <p class="text-muted mb-3" style="font-size:0.82rem">配置截图识别的仪表盘类型。点击「同步指标」可从巡检对象拉取指标配置。</p>
+                <div id="types-list">
+                    <div class="text-muted">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 识别参数 -->
+        <div class="card">
+            <details>
+                <summary class="card-body card-summary">
+                    <div class="d-flex justify-content-between align-items-center w-100">
+                        <h5 class="card-title mb-0">识别参数配置</h5>
+                        <small class="text-muted">点击展开</small>
+                    </div>
+                </summary>
+                <div class="card-body pt-0">
+                    <hr class="my-3">
+                    <div class="row">
+                            <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label d-flex justify-content-between">
+                                    <span>文本置信度阈值</span>
+                                    <span id="text-score-value" class="text-muted">{{ config.text_score }}</span>
+                                </label>
+                                <input type="range" class="form-range" id="text-score" min="0" max="1" step="0.05" value="{{ config.text_score }}">
+                                <small class="text-muted">值越高越严格（推荐 0.3~0.7）</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">最小高度约束</label>
+                                <input type="number" class="form-control form-control-sm" id="min-height" value="{{ config.min_height }}" min="1" max="200">
+                                <small class="text-muted">忽略小于此值的文字（像素）</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">最大边长</label>
+                                <input type="number" class="form-control form-control-sm" id="max-side-len" value="{{ config.max_side_len }}" min="100" max="10000">
+                                <small class="text-muted">超出将被缩放</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="use-det" {{ 'checked' if config.use_det else '' }}>
+                                    <label class="form-check-label" for="use-det">启用文本检测</label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="use-cls" {{ 'checked' if config.use_cls else '' }}>
+                                    <label class="form-check-label" for="use-cls">启用文本分类</label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="use-rec" {{ 'checked' if config.use_rec else '' }}>
+                                    <label class="form-check-label" for="use-rec">启用文本识别</label>
+                                </div>
+                            </div>
+
+                            <hr>
+                            <h6 class="mb-2">忽略边框区域</h6>
+                            <div class="mb-2">
+                                <label class="form-label d-flex justify-content-between" style="font-size:0.8rem">
+                                    <span>顶部</span>
+                                    <span id="ignore-top-value" class="text-muted">{{ config.ignore_top }}%</span>
+                                </label>
+                                <input type="range" class="form-range form-range-sm" id="ignore-top" min="0" max="30" step="1" value="{{ config.ignore_top }}">
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label d-flex justify-content-between" style="font-size:0.8rem">
+                                    <span>底部</span>
+                                    <span id="ignore-bottom-value" class="text-muted">{{ config.ignore_bottom }}%</span>
+                                </label>
+                                <input type="range" class="form-range form-range-sm" id="ignore-bottom" min="0" max="30" step="1" value="{{ config.ignore_bottom }}">
+                            </div>
+                            <small class="text-muted">过滤标题栏、水印等 UI 元素</small>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-3">
+                        <button id="btn-apply" class="btn btn-primary flex-fill">应用（实时生效）</button>
+                        <button id="btn-save" class="btn btn-outline-success flex-fill">保存（持久化）</button>
+                    </div>
+                    <div id="config-status" class="mt-2"></div>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <!-- 右列：测试识别 -->
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title mb-3">测试识别</h5>
+                <p class="card-text mb-3" style="font-size:0.85rem">上传截图测试识别效果，会显示命中哪个仪表盘类型</p>
+
+                <div id="test-drop-zone" class="drop-zone">
+                    <div class="drop-zone-content">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <p>粘贴或拖入截图</p>
+                        <small class="text-muted">Ctrl+V / 拖拽 / 点击选择</small>
+                    </div>
+                    <input type="file" id="test-file-input" accept="image/*" style="display:none">
+                </div>
+
+                <div id="test-preview" style="display:none" class="mt-3">
+                    <img id="test-preview-img" class="img-fluid rounded" style="max-height:200px;width:100%;object-fit:contain;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;">
+                    <div class="mt-2 d-flex gap-2">
+                        <button id="btn-test-ocr" class="btn btn-primary flex-fill">开始测试</button>
+                        <button id="btn-test-clear" class="btn btn-outline-danger">清除</button>
+                    </div>
+                </div>
+
+                <div id="test-status" class="mt-3"></div>
+                <div id="test-results" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 类型编辑模态框 -->
+<div id="type-modal" class="modal-mask" style="display:none">
+    <div id="type-modal-dialog" class="modal-dialog">
+        <h5 id="modal-title">新建仪表盘类型</h5>
+        <p id="modal-create-hint" class="text-muted mb-3" style="font-size:0.82rem;display:none">创建后可点击「同步」按钮从巡检对象自动拉取指标配置。</p>
+        <input type="hidden" id="modal-type-id">
+        <div class="mb-3">
+            <label class="form-label">类型 ID <small class="text-muted">（英文标识，新建时自动生成）</small></label>
+            <input type="text" class="form-control" id="modal-type-id-input" placeholder="如: monitor, vehicle">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">显示名称</label>
+            <input type="text" class="form-control" id="modal-type-name" placeholder="如: 监控">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">描述</label>
+            <input type="text" class="form-control" id="modal-type-desc" placeholder="如: 监控系统仪表盘">
+        </div>
+        <div class="mb-3">
+            <label class="form-label">识别关键词 <small class="text-muted">（每行一个，包含任一即命中）</small></label>
+            <textarea class="form-control" id="modal-type-keywords" rows="3" placeholder="监控点总数&#10;监控点在线率"></textarea>
+        </div>
+        <div id="modal-advanced-fields">
+            <div class="mb-3">
+                <label class="form-label">标签映射 <small class="text-muted">（每行一个，格式: 显示名称=内部key）</small></label>
+                <textarea class="form-control" id="modal-type-labels" rows="4" placeholder="监控点总数=total&#10;在线=online&#10;离线=offline&#10;未检测=undetected"></textarea>
+            </div>
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="modal-type-extra-rate">
+                    <label class="form-check-label" for="modal-type-extra-rate">
+                        启用在线率校验 <small class="text-muted">（自动提取百分比用于交叉校验）</small>
+                    </label>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">结果规则 <small class="text-muted">（每行一个，格式: metric_key op value=结果）</small></label>
+                <textarea class="form-control" id="modal-type-rules" rows="3" placeholder="offline>0=异常&#10;online_rate<90=异常&#10;online_rate<95=需关注"></textarea>
+            </div>
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="modal-type-num-before">
+                    <label class="form-check-label" for="modal-type-num-before">
+                        数字前置格式 <small class="text-muted">（如 "123 关注"，数字在标签前面）</small>
+                    </label>
+                </div>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary flex-fill" id="modal-confirm">保存</button>
+            <button class="btn btn-outline-secondary" id="modal-cancel">取消</button>
+        </div>
+        <div id="modal-status" class="mt-2"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const textScore = document.getElementById('text-score');
+    const textScoreValue = document.getElementById('text-score-value');
+    const useDet = document.getElementById('use-det');
+    const useCls = document.getElementById('use-cls');
+    const useRec = document.getElementById('use-rec');
+    const minHeight = document.getElementById('min-height');
+    const maxSideLen = document.getElementById('max-side-len');
+    const ignoreTop = document.getElementById('ignore-top');
+    const ignoreTopValue = document.getElementById('ignore-top-value');
+    const ignoreBottom = document.getElementById('ignore-bottom');
+    const ignoreBottomValue = document.getElementById('ignore-bottom-value');
+    const btnApply = document.getElementById('btn-apply');
+    const btnSave = document.getElementById('btn-save');
+    const configStatus = document.getElementById('config-status');
+    const typesList = document.getElementById('types-list');
+    const btnAddType = document.getElementById('btn-add-type');
+    const btnSyncTypes = document.getElementById('btn-sync-types');
+    const typeModal = document.getElementById('type-modal');
+
+    let allTypes = [];
+
+    textScore.addEventListener('input', () => { textScoreValue.textContent = textScore.value; });
+    ignoreTop.addEventListener('input', () => { ignoreTopValue.textContent = ignoreTop.value + '%'; });
+    ignoreBottom.addEventListener('input', () => { ignoreBottomValue.textContent = ignoreBottom.value + '%'; });
+
+    function getConfig() {
+        return {
+            text_score: parseFloat(textScore.value),
+            use_det: useDet.checked,
+            use_cls: useCls.checked,
+            use_rec: useRec.checked,
+            min_height: parseInt(minHeight.value) || 30,
+            max_side_len: parseInt(maxSideLen.value) || 2000,
+            ignore_top: parseInt(ignoreTop.value) || 0,
+            ignore_bottom: parseInt(ignoreBottom.value) || 0
+        };
+    }
+
+    function showStatus(msg, type) {
+        configStatus.innerHTML = `<div class="alert alert-${type} mb-0 py-1" style="font-size:0.85rem">${msg}</div>`;
+        setTimeout(() => { configStatus.innerHTML = ''; }, 3000);
+    }
+
+    btnApply.addEventListener('click', async () => {
+        btnApply.disabled = true;
+        btnApply.textContent = '应用中...';
+        try {
+            const resp = await fetch('/api/ocr-config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(getConfig())
+            });
+            const data = await resp.json();
+            showStatus(data.error || '配置已应用，引擎已重建', data.error ? 'danger' : 'success');
+        } catch(e) {
+            showStatus('请求失败: ' + e.message, 'danger');
+        }
+        btnApply.disabled = false;
+        btnApply.textContent = '应用（实时生效）';
+    });
+
+    btnSave.addEventListener('click', async () => {
+        btnSave.disabled = true;
+        btnSave.textContent = '保存中...';
+        try {
+            const resp = await fetch('/api/ocr-config/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(getConfig())
+            });
+            const data = await resp.json();
+            showStatus(data.error || '配置已保存', data.error ? 'danger' : 'success');
+        } catch(e) {
+            showStatus('保存失败: ' + e.message, 'danger');
+        }
+        btnSave.disabled = false;
+        btnSave.textContent = '保存（持久化）';
+    });
+
+    // ========== 仪表盘类型管理 ==========
+    async function loadTypes() {
+        try {
+            const resp = await fetch('/api/dashboard-types');
+            allTypes = await resp.json();
+            renderTypes();
+        } catch(e) {
+            typesList.innerHTML = '<div class="text-danger">加载失败</div>';
+        }
+    }
+
+    function renderTypes() {
+        if (allTypes.length === 0) {
+            typesList.innerHTML = '<div class="text-muted">暂无仪表盘类型，点击右上角新建</div>';
+            return;
+        }
+        const colors = ['#6366f1', '#22c55e', '#06b6d4', '#f59e0b', '#8b5cf6'];
+        typesList.innerHTML = allTypes.map((t, i) => {
+            const color = colors[i % colors.length];
+            const labels = Object.entries(t.labels || {}).map(([k, v]) =>
+                `<span class="metric-tag" style="border-color:${color}30;background:${color}10;color:${color}">${escHtml(k)}</span>`
+            ).join('');
+            const keywords = (t.detect_keywords || []).map(k =>
+                `<code>${escHtml(k)}</code>`
+            ).join(' ');
+            return `<div class="type-card" style="border-left:3px solid ${color}">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="type-name">${escHtml(t.name)}</span>
+                        <small class="text-muted ms-2">${escHtml(t.description || '')}</small>
+                    </div>
+                    <div class="d-flex gap-1 flex-shrink-0">
+                        <button class="btn btn-sm btn-outline-success py-0" style="font-size:0.75rem" onclick="syncType('${escAttr(t.id)}', this)">同步</button>
+                        <button class="btn btn-sm btn-outline-primary py-0" style="font-size:0.75rem" onclick="editType('${escAttr(t.id)}')">编辑</button>
+                        <button class="btn btn-sm btn-outline-danger py-0" style="font-size:0.75rem" onclick="deleteType('${escAttr(t.id)}')">删除</button>
+                    </div>
+                </div>
+                <div class="type-detail mt-2">
+                    <div class="mb-1"><strong>关键词：</strong>${keywords || '<span class="text-muted">无</span>'}</div>
+                    <div><strong>指标：</strong>${labels || '<span class="text-muted">无</span>'}</div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    window.editType = function(id) {
+        const t = allTypes.find(x => x.id === id);
+        if (!t) return;
+        document.getElementById('modal-title').textContent = '编辑仪表盘类型';
+        document.getElementById('modal-type-id').value = id;
+        document.getElementById('modal-type-id-input').value = t.id;
+        document.getElementById('modal-type-id-input').disabled = true;
+        document.getElementById('modal-type-name').value = t.name || '';
+        document.getElementById('modal-type-desc').value = t.description || '';
+        document.getElementById('modal-type-keywords').value = (t.detect_keywords || []).join('\n');
+        document.getElementById('modal-type-labels').value = Object.entries(t.labels || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+        document.getElementById('modal-type-extra-rate').checked = (t.extra_labels || []).includes('在线率');
+        document.getElementById('modal-type-rules').value = Object.entries(t.result_rules || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+        document.getElementById('modal-type-num-before').checked = !!t.number_before_label;
+        document.getElementById('modal-advanced-fields').style.display = '';
+        document.getElementById('modal-create-hint').style.display = 'none';
+        document.getElementById('modal-status').innerHTML = '';
+        openModal();
+    };
+
+    window.deleteType = async function(id) {
+        if (!confirm('确定删除此仪表盘类型？')) return;
+        try {
+            const resp = await fetch(`/api/dashboard-types/${id}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (data.error) alert(data.error);
+            else loadTypes();
+        } catch(e) {
+            alert('删除失败: ' + e.message);
+        }
+    };
+
+    window.syncType = async function(id, btn) {
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = '同步中...';
+        try {
+            const resp = await fetch(`/api/dashboard-types/${id}/sync`, { method: 'POST' });
+            const data = await resp.json();
+            if (data.error) {
+                alert(data.error);
+            } else {
+                loadTypes();
+            }
+        } catch(e) {
+            alert('同步失败: ' + e.message);
+        }
+        btn.disabled = false;
+        btn.textContent = originalText;
+    };
+
+    btnSyncTypes.addEventListener('click', async () => {
+        btnSyncTypes.disabled = true;
+        btnSyncTypes.textContent = '同步中...';
+        try {
+            const resp = await fetch('/api/dashboard-types/sync', { method: 'POST' });
+            const data = await resp.json();
+            if (data.error) {
+                alert(data.error);
+            } else {
+                alert(`同步完成：新建 ${data.created} 个，更新 ${data.updated} 个（共 ${data.total_objects} 个巡检对象）`);
+                loadTypes();
+            }
+        } catch(e) {
+            alert('同步失败: ' + e.message);
+        }
+        btnSyncTypes.disabled = false;
+        btnSyncTypes.textContent = '同步指标';
+    });
+
+    btnAddType.addEventListener('click', () => {
+        document.getElementById('modal-title').textContent = '新建仪表盘类型';
+        document.getElementById('modal-type-id').value = '';
+        document.getElementById('modal-type-id-input').value = '';
+        document.getElementById('modal-type-id-input').disabled = false;
+        document.getElementById('modal-type-name').value = '';
+        document.getElementById('modal-type-desc').value = '';
+        document.getElementById('modal-type-keywords').value = '';
+        document.getElementById('modal-type-labels').value = '';
+        document.getElementById('modal-type-extra-rate').checked = false;
+        document.getElementById('modal-type-rules').value = '';
+        document.getElementById('modal-type-num-before').checked = false;
+        document.getElementById('modal-advanced-fields').style.display = 'none';
+        document.getElementById('modal-create-hint').style.display = '';
+        document.getElementById('modal-status').innerHTML = '';
+        openModal();
+    });
+
+    // Modal
+    let modalDirty = false;
+
+    function getModalFormData() {
+        const labels = {};
+        document.getElementById('modal-type-labels').value.split('\n').forEach(line => {
+            line = line.trim();
+            if (line.includes('=')) {
+                const [k, v] = line.split('=', 2);
+                labels[k.trim()] = v.trim();
+            }
+        });
+        return {
+            id: document.getElementById('modal-type-id-input').value.trim(),
+            name: document.getElementById('modal-type-name').value.trim(),
+            desc: document.getElementById('modal-type-desc').value.trim(),
+            keywords: document.getElementById('modal-type-keywords').value.trim(),
+            labels: JSON.stringify(labels),
+            extra: document.getElementById('modal-type-extra-rate').checked,
+            rules: document.getElementById('modal-type-rules').value.trim(),
+            numBefore: document.getElementById('modal-type-num-before').checked,
+        };
+    }
+
+    let savedModalData = '';
+
+    function checkModalDirty() {
+        modalDirty = savedModalData !== JSON.stringify(getModalFormData());
+    }
+
+    function closeModal() {
+        typeModal.style.display = 'none';
+        modalDirty = false;
+    }
+
+    function tryCloseModal() {
+        if (!modalDirty) {
+            closeModal();
+            return;
+        }
+        if (confirm('有未保存的修改，确定放弃？')) {
+            closeModal();
+        }
+    }
+
+    document.getElementById('modal-cancel').addEventListener('click', tryCloseModal);
+
+    const modalDialog = document.getElementById('type-modal-dialog');
+    modalDialog.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+    });
+    typeModal.addEventListener('mousedown', (e) => {
+        if (e.target === typeModal) tryCloseModal();
+    });
+
+    function openModal() {
+        savedModalData = JSON.stringify(getModalFormData());
+        modalDirty = false;
+        typeModal.style.display = 'flex';
+    }
+
+    ['modal-type-id-input','modal-type-name','modal-type-desc','modal-type-keywords',
+     'modal-type-labels','modal-type-extra-rate','modal-type-rules','modal-type-num-before'
+    ].forEach(id => {
+        const el = document.getElementById(id);
+        el.addEventListener('input', checkModalDirty);
+        el.addEventListener('change', checkModalDirty);
+    });
+
+    document.getElementById('modal-confirm').addEventListener('click', async () => {
+        try {
+            const existingId = document.getElementById('modal-type-id').value;
+            const typeId = document.getElementById('modal-type-id-input').value.trim();
+            const name = document.getElementById('modal-type-name').value.trim();
+            if (!name) {
+                document.getElementById('modal-status').innerHTML = '<div class="text-danger">名称不能为空</div>';
+                return;
+            }
+
+            const labels = {};
+            document.getElementById('modal-type-labels').value.split('\n').forEach(line => {
+                line = line.trim();
+                if (line.includes('=')) {
+                    const [k, v] = line.split('=', 2);
+                    labels[k.trim()] = v.trim();
+                }
+            });
+
+            const rules = {};
+            document.getElementById('modal-type-rules').value.split('\n').forEach(line => {
+                line = line.trim();
+                if (line.includes('=')) {
+                    const [k, v] = line.split('=', 2);
+                    rules[k.trim()] = v.trim();
+                }
+            });
+
+            const extraLabels = document.getElementById('modal-type-extra-rate').checked ? ['在线率'] : [];
+            const generatedId = typeId || name.toLowerCase().replace(/[^a-z0-9]/g, '') || ('type_' + Date.now());
+            const payload = {
+                id: generatedId,
+                name: name,
+                description: document.getElementById('modal-type-desc').value.trim(),
+                detect_keywords: document.getElementById('modal-type-keywords').value.split('\n').map(s => s.trim()).filter(Boolean),
+                labels: labels,
+                extra_labels: extraLabels,
+                result_rules: rules,
+                number_before_label: document.getElementById('modal-type-num-before').checked,
+            };
+
+            let resp;
+            if (existingId) {
+                resp = await fetch(`/api/dashboard-types/${existingId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                resp = await fetch('/api/dashboard-types', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+            }
+            const data = await resp.json();
+            if (data.error) {
+                document.getElementById('modal-status').innerHTML = `<div class="text-danger">${data.error}</div>`;
+            } else {
+                closeModal();
+                loadTypes();
+            }
+        } catch(e) {
+            console.error('保存失败:', e);
+            document.getElementById('modal-status').innerHTML = `<div class="text-danger">保存失败: ${e.message}</div>`;
+        }
+    });
+
+    loadTypes();
+
+    // ========== 测试识别 ==========
+    const testDropZone = document.getElementById('test-drop-zone');
+    const testFileInput = document.getElementById('test-file-input');
+    const testPreview = document.getElementById('test-preview');
+    const testPreviewImg = document.getElementById('test-preview-img');
+    const btnTestOcr = document.getElementById('btn-test-ocr');
+    const btnTestClear = document.getElementById('btn-test-clear');
+    const testStatus = document.getElementById('test-status');
+    const testResults = document.getElementById('test-results');
+
+    let currentTestImage = null;
+
+    testDropZone.addEventListener('click', () => testFileInput.click());
+    testFileInput.addEventListener('change', (e) => handleTestFile(e.target.files[0]));
+
+    testDropZone.addEventListener('dragover', (e) => { e.preventDefault(); testDropZone.classList.add('dragover'); });
+    testDropZone.addEventListener('dragleave', () => testDropZone.classList.remove('dragover'));
+    testDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        testDropZone.classList.remove('dragover');
+        handleTestFile(e.dataTransfer.files[0]);
+    });
+
+    document.addEventListener('paste', (e) => {
+        if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+        const items = e.clipboardData.items;
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                handleTestFile(item.getAsFile());
+                break;
+            }
+        }
+    });
+
+    function handleTestFile(file) {
+        if (!file || !file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            currentTestImage = e.target.result;
+            testPreviewImg.src = currentTestImage;
+            testPreview.style.display = 'block';
+            testDropZone.style.display = 'none';
+            testResults.innerHTML = '';
+            testStatus.innerHTML = '';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    btnTestClear.addEventListener('click', () => {
+        currentTestImage = null;
+        testPreview.style.display = 'none';
+        testDropZone.style.display = 'block';
+        testResults.innerHTML = '';
+        testStatus.innerHTML = '';
+        testFileInput.value = '';
+    });
+
+    btnTestOcr.addEventListener('click', async () => {
+        if (!currentTestImage) return;
+        testStatus.innerHTML = '<div class="alert alert-info py-1 mb-2" style="font-size:0.85rem">识别中...</div>';
+        testResults.innerHTML = '';
+        btnTestOcr.disabled = true;
+
+        try {
+            const resp = await fetch('/api/ocr/test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({image: currentTestImage})
+            });
+            const data = await resp.json();
+            if (data.error) {
+                testStatus.innerHTML = `<div class="alert alert-danger py-1 mb-2" style="font-size:0.85rem">${data.error}</div>`;
+                return;
+            }
+            if (data.raw_lines && data.raw_lines.length > 0) {
+                testStatus.innerHTML = `<div class="alert alert-success py-1 mb-2" style="font-size:0.85rem">识别到 ${data.raw_lines.length} 行文本</div>`;
+            } else {
+                testStatus.innerHTML = '<div class="alert alert-warning py-1 mb-2" style="font-size:0.85rem">未识别到任何文本</div>';
+                return;
+            }
+
+            const allText = data.raw_lines.join('\n');
+            let matchedType = null;
+            for (const t of allTypes) {
+                const keywords = t.detect_keywords || [];
+                if (keywords.some(kw => allText.includes(kw))) {
+                    matchedType = t;
+                    break;
+                }
+            }
+
+            let resultsHtml = '';
+            if (matchedType) {
+                resultsHtml += `<div class="match-result match-hit">
+                    <span class="badge bg-success">命中</span>
+                    <strong>${escHtml(matchedType.name)}</strong>
+                    <small class="text-muted">${escHtml(matchedType.description || '')}</small>
+                </div>`;
+            } else {
+                resultsHtml += `<div class="match-result match-miss">
+                    <span class="badge bg-secondary">未命中</span>
+                    <span class="text-muted">未匹配到仪表盘类型</span>
+                </div>`;
+            }
+
+            const ocrText = data.raw_lines.join('\n');
+            resultsHtml += `<div class="copy-box">
+                <button class="copy-btn" onclick="copyOcrText(this)" data-text="${escAttr(ocrText)}">复制</button>
+                <pre style="font-size:0.78rem;max-height:350px;overflow:auto;background:var(--bg-input);padding:0.65rem;border-radius:8px;white-space:pre-wrap;margin:0;">${escHtml(ocrText)}</pre>
+            </div>`;
+            testResults.innerHTML = resultsHtml;
+        } catch(e) {
+            testStatus.innerHTML = `<div class="alert alert-danger py-1 mb-2" style="font-size:0.85rem">请求失败: ${e.message}</div>`;
+        }
+        btnTestOcr.disabled = false;
+    });
+
+    function escHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+    function escAttr(s) {
+        return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    window.copyOcrText = async function(btn) {
+        const text = btn.getAttribute('data-text');
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch(e) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        btn.textContent = '已复制';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 1500);
+    };
+})();
+</script>
+
+<style>
+.drop-zone {
+    border: 2px dashed var(--border-input);
+    border-radius: 12px;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: var(--bg-input);
+}
+.drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--accent);
+    background: var(--primary-soft);
+}
+.drop-zone-content p {
+    color: var(--text-secondary);
+    margin: 0.5rem 0 0.25rem;
+    font-weight: 500;
+}
+.type-card {
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-input);
+    margin-bottom: 0.5rem;
+}
+.type-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.type-detail {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+.type-detail code {
+    font-size: 0.72rem;
+    padding: 0.12rem 0.4rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+.metric-tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.12rem 0.4rem;
+    margin: 0.1rem 0.15rem;
+    border-radius: 4px;
+    border: 1px solid;
+}
+.match-result {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+}
+.match-hit {
+    background: rgba(34,197,94,0.1);
+    border: 1px solid rgba(34,197,94,0.3);
+}
+.match-miss {
+    background: rgba(156,163,175,0.1);
+    border: 1px solid rgba(156,163,175,0.3);
+}
+.modal-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 1rem;
+}
+.modal-dialog {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    position: relative;
+    pointer-events: auto;
+}
+.modal-dialog h5 {
+    margin-bottom: 1rem;
+    font-weight: 600;
+}
+.copy-box {
+    position: relative;
+    margin-top: 0.5rem;
+}
+.copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    cursor: pointer;
+    z-index: 1;
+    transition: all 0.15s;
+}
+.copy-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.copy-btn.copied {
+    background: var(--success);
+    color: #fff;
+    border-color: var(--success);
+}
+.card-summary {
+    cursor: pointer;
+    user-select: none;
+}
+.card-summary::-webkit-details-marker { display: none; }
+.card-summary::marker { display: none; content: ''; }
+</style>
+{% endblock %}

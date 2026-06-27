@@ -1,0 +1,85 @@
+{
+  "types": [
+    {
+      "id": "monitor",
+      "name": "监控",
+      "description": "监控系统仪表盘",
+      "detect_keywords": [
+        "监控点总数",
+        "监控点在线率"
+      ],
+      "labels": {
+        "监控点总数": "total",
+        "在线": "online",
+        "离线": "offline",
+        "未检测": "undetected"
+      },
+      "extra_labels": [
+        "在线率"
+      ],
+      "result_rules": {
+        "offline>0": "异常",
+        "online_rate<90": "异常",
+        "online_rate<95": "需关注"
+      }
+    },
+    {
+      "id": "vehicle",
+      "name": "车辆",
+      "description": "车辆管理仪表盘",
+      "detect_keywords": [
+        "全部车辆",
+        "车辆总数",
+        "在线车辆",
+        "报警车辆"
+      ],
+      "labels": {
+        "车辆总数": "total",
+        "在线车辆": "online",
+        "今日上线": "today_online",
+        "报警车辆": "alarm"
+      },
+      "extra_labels": [],
+      "result_rules": {
+        "alarm>0": "异常"
+      }
+    },
+    {
+      "id": "badge",
+      "name": "工牌",
+      "description": "工牌/账户设备仪表盘",
+      "detect_keywords": [
+        "工牌",
+        "账户设备"
+      ],
+      "labels": {
+        "全部": "total",
+        "在线": "online",
+        "离线": "offline",
+        "未用": "unused"
+      },
+      "extra_labels": [],
+      "result_rules": {
+        "offline>0": "异常"
+      }
+    },
+    {
+      "id": "type_1782497693288",
+      "name": "哔哩哔哩",
+      "description": "哔哩哔哩粉丝分析",
+      "detect_keywords": [
+        "粉丝",
+        "哔哩哔哩"
+      ],
+      "labels": {
+        "姓名": "昵称",
+        "粉丝": "粉丝",
+        "关注": "关注",
+        "获赞": "zan"
+      },
+      "extra_labels": [],
+      "result_rules": {},
+      "number_before_label": true
+    }
+  ]
+}
