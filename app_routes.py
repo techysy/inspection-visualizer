@@ -284,7 +284,9 @@ def parse_dashboard_screenshot(all_text, lines):
     metrics = {}
 
     # 逐行匹配（使用队列处理连续标签无数字的情况）
+    name_from_first_line = matched_type.get('name_from_first_line', False)
     pending_labels = []
+    unmatched_lines = [] if name_from_first_line else None
     for line in lines:
         line = line.strip()
         if not line:
@@ -310,38 +312,35 @@ def parse_dashboard_screenshot(all_text, lines):
             pending_labels = []
             continue
 
-        # 3) 匹配标签行（按优先级从长到短排序，避免"在线"误匹配"在线车辆"）
-        matched_label = None
-        matched_val = None
-
+        # 3) 匹配标签行（在行内查找所有出现的标签-数值对）
         sorted_labels = sorted(label_map.keys(), key=len, reverse=True)
+        line_matched = False
         for label in sorted_labels:
-            patterns = [
-                rf'^{re.escape(label)}\s*\((\d+)\)$',
-                rf'^{re.escape(label)}\s*(\d+)$',
-                rf'^{re.escape(label)}$',
-            ]
+            # 构建搜索模式：标签后跟可选分隔符 + 数值 + 可选单位
+            search_pattern = rf'{re.escape(label)}\s*[·.:：]?\s*([\d.]+)\s*([万亿]?)'
             if number_before_label:
-                patterns.insert(0, rf'^(\d+)\s*{re.escape(label)}$')
-            for pattern in patterns:
-                m = re.match(pattern, line)
-                if m:
-                    matched_label = label_map[label]
-                    if m.lastindex and m.group(1):
-                        matched_val = int(m.group(1))
-                    break
-            if matched_label:
-                break
-
-        if matched_label:
-            if matched_val is not None:
+                search_pattern = rf'([\d.]+)\s*([万亿]?)\s*[·.:：]?\s*{re.escape(label)}'
+            for m in re.finditer(search_pattern, line):
+                matched_label = label_map[label]
+                raw = m.group(1)
+                unit = m.group(2) if len(m.groups()) >= 2 else ''
+                if unit == '万':
+                    matched_val = int(float(raw) * 10000)
+                elif unit == '亿':
+                    matched_val = int(float(raw) * 100000000)
+                else:
+                    matched_val = int(float(raw))
                 metrics[matched_label] = matched_val
-            else:
-                pending_labels.append(matched_label)
-            print(f'  PARSE: {matched_label}={matched_val if matched_val is not None else "等待数字"}')
+                line_matched = True
+                print(f'  PARSE: {matched_label}={matched_val}')
+
+        if line_matched:
+            pending_labels = []
             continue
 
         pending_labels = []
+        if unmatched_lines is not None and len(line) >= 2 and not re.match(r'^\d+$', line):
+            unmatched_lines.append(line)
 
     # 识别在线率百分比（如果有 extra_labels 包含"在线率"）
     extra_labels = matched_type.get('extra_labels', [])
@@ -442,8 +441,13 @@ def parse_dashboard_screenshot(all_text, lines):
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
     timestamp = f'{screenshot_date} {now.split(" ")[1]}' if screenshot_date else now
 
+    point_name = ''
+    if name_from_first_line and unmatched_lines:
+        point_name = unmatched_lines[0]
+        print(f'  PARSE: 从首行提取名称: {point_name}')
+
     return {
-        'point_name': '',
+        'point_name': point_name,
         'location': region_name,
         'result': result,
         'status_detail': '; '.join(status_detail_parts),
@@ -453,6 +457,7 @@ def parse_dashboard_screenshot(all_text, lines):
         'is_dashboard': True,
         'dashboard_type': matched_type['id'],
         'dashboard_type_name': matched_type['name'],
+        'dashboard_category': matched_type.get('category', matched_type['name']),
     }
 
 
@@ -685,6 +690,10 @@ def objects():
     session = SessionLocal()
     try:
         object_list = session.query(InspectionObject).order_by(InspectionObject.location, InspectionObject.name).all()
+        from datetime import timedelta
+        for obj in object_list:
+            if obj.created_at:
+                obj.created_at = obj.created_at + timedelta(hours=8)
         return render_template('objects.html', objects=object_list)
     finally:
         session.close()
@@ -1387,6 +1396,14 @@ def api_dashboard_types_list():
     return jsonify(_load_dashboard_types())
 
 
+@main.route('/api/dashboard-types/categories', methods=['GET'])
+def api_dashboard_types_categories():
+    """获取所有仪表盘分类"""
+    types_list = _load_dashboard_types()
+    categories = sorted(set(t.get('category', '') for t in types_list if t.get('category', '').strip()))
+    return jsonify(categories)
+
+
 @main.route('/api/dashboard-types', methods=['POST'])
 def api_dashboard_types_add():
     """添加仪表盘类型"""
@@ -1406,6 +1423,7 @@ def api_dashboard_types_add():
     new_type = {
         'id': new_id,
         'name': data['name'].strip(),
+        'category': data.get('category', '').strip(),
         'description': data.get('description', '').strip(),
         'detect_keywords': data.get('detect_keywords', []),
         'labels': data.get('labels', {}),
@@ -1429,6 +1447,7 @@ def api_dashboard_types_update(type_id):
         if t['id'] == type_id:
             types_list[i].update({
                 'name': data.get('name', t['name']),
+                'category': data.get('category', t.get('category', '')),
                 'description': data.get('description', t['description']),
                 'detect_keywords': data.get('detect_keywords', t['detect_keywords']),
                 'labels': data.get('labels', t['labels']),
@@ -1590,9 +1609,15 @@ def api_quick_create_object():
 
     session = SessionLocal()
     try:
-        existing = session.query(InspectionObject).filter_by(name=name, status='active').first()
+        query = session.query(InspectionObject).filter_by(name=name, status='active')
+        if location:
+            query = query.filter_by(location=location)
+        existing = query.first()
         if existing:
-            return jsonify({'error': f'对象 "{name}" 已存在', 'id': existing.id}), 409
+            msg = f'对象 "{name}" 已存在'
+            if location:
+                msg += f'（位置: {location}）'
+            return jsonify({'error': msg, 'id': existing.id}), 409
 
         obj = InspectionObject(name=name, location=location, device_type=device_type, description=description)
         session.add(obj)
@@ -1601,6 +1626,45 @@ def api_quick_create_object():
     except Exception as e:
         session.rollback()
         return jsonify({'error': f'创建失败: {str(e)}'}), 500
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/<int:object_id>/sync-metrics', methods=['POST'])
+def api_object_sync_metrics(object_id):
+    """从仪表盘类型同步指标到巡检对象"""
+    data = request.get_json() or {}
+    dashboard_type_name = data.get('dashboard_type_name', '').strip()
+    if not dashboard_type_name:
+        return jsonify({'error': '缺少仪表盘类型名称'}), 400
+
+    types_list = _load_dashboard_types()
+    dashboard_type = next((t for t in types_list if t['name'] == dashboard_type_name), None)
+    if not dashboard_type:
+        return jsonify({'error': f'未找到仪表盘类型 "{dashboard_type_name}"'}), 404
+
+    labels = dashboard_type.get('labels', {})
+    if not labels:
+        return jsonify({'ok': True, 'created': 0})
+
+    session = SessionLocal()
+    try:
+        obj = session.query(InspectionObject).get(object_id)
+        if not obj:
+            return jsonify({'error': '巡检对象不存在'}), 404
+
+        existing_keys = {m.key for m in obj.metrics}
+        created = 0
+        for i, (label_name, label_key) in enumerate(labels.items()):
+            if label_key not in existing_keys:
+                m = ObjectMetric(object_id=object_id, key=label_key, name=label_name, sort_order=i)
+                session.add(m)
+                created += 1
+        session.commit()
+        return jsonify({'ok': True, 'created': created, 'total': len(labels)})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         session.close()
 
@@ -1664,6 +1728,7 @@ def api_save():
     saved = 0
     skipped = 0
     created = 0
+    last_object_id = None
     try:
         all_objects = session.query(InspectionObject).filter_by(status='active').all()
         all_inspectors = session.query(Inspector).all()
@@ -1677,35 +1742,41 @@ def api_save():
             inspector_name = item.get('inspector', '')
             timestamp_str = item.get('timestamp')
             is_dashboard = item.get('is_dashboard', False)
+            dashboard_type_name = item.get('dashboard_type_name', '') if is_dashboard else ''
+            dashboard_category = item.get('dashboard_category', '') if is_dashboard else ''
             front_point_id = item.get('point_id')
 
             # 匹配巡检对象
             obj = None
 
-            # 优先使用前端已选择的 point_id
+            # 优先使用前端已选择的 point_id（但 device_type 须匹配）
             if front_point_id:
                 try:
                     obj = session.query(InspectionObject).get(int(front_point_id))
+                    if obj and dashboard_category and (obj.device_type or '') != dashboard_category:
+                        print(f'  SAVE: 前端选择对象 device_type={obj.device_type} 与类别 {dashboard_category} 不匹配，忽略')
+                        obj = None
                 except (ValueError, TypeError):
                     obj = None
 
-            # 如果有明确的对象名称，先按名称匹配
+            # 如果有明确的对象名称，先按名称匹配（仪表盘类型需 device_type 匹配）
             if not obj and object_name:
-                obj = _match_object(object_name, all_objects)
+                obj = _match_object(object_name, all_objects, expected_type=dashboard_category)
             
-            # 仪表盘格式：优先按位置匹配
+            # 仪表盘格式：优先按位置匹配（仪表盘类型需 device_type 匹配）
             if not obj and is_dashboard and location:
-                obj = _match_object_by_location(location, all_objects)
+                obj = _match_object_by_location(location, all_objects, expected_type=dashboard_category)
             
-            # 仪表盘格式：如果没有位置匹配，尝试匹配监控类型
+            # 仪表盘格式：如果没有位置匹配，尝试按仪表盘类型匹配
             if not obj and is_dashboard:
-                obj = _match_object_by_type('监控', all_objects)
+                match_type = dashboard_category or '监控'
+                obj = _match_object_by_type(match_type, all_objects)
             
             # 如果还是没有匹配，创建新对象
             if not obj:
                 if is_dashboard and location:
-                    obj_name = location
-                    obj_location = location
+                    obj_name = dashboard_type_name or location
+                    obj_location = object_name or location
                 elif object_name:
                     obj_name = object_name
                     obj_location = location
@@ -1716,8 +1787,8 @@ def api_save():
                 obj = InspectionObject(
                     name=obj_name,
                     location=obj_location,
-                    device_type='监控',
-                    description=f'OCR自动创建 - {status_detail}',
+                    device_type=dashboard_category or '监控',
+                    description=f'OCR自动创建 [{dashboard_type_name or "监控"}] - {status_detail}',
                     status='active'
                 )
                 session.add(obj)
@@ -1753,6 +1824,37 @@ def api_save():
 
             # 根据指标阈值重新判断结果
             parsed_metrics = _parse_status_to_metrics(status_detail)
+
+            # 自动创建指标配置（如果不存在）
+            if parsed_metrics:
+                existing_metrics = {m.key: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
+                for key, val in parsed_metrics.items():
+                    try:
+                        fv = float(val)
+                    except (ValueError, TypeError):
+                        continue
+                    if key in existing_metrics:
+                        m = existing_metrics[key]
+                        new_max = max(fv * 1.5, 100)
+                        if m.unit == 'w':
+                            new_max = max(fv * 1.5, 10000)
+                        if new_max > (m.max_value or 100):
+                            m.max_value = new_max
+                        if fv >= 10000 and not m.unit:
+                            m.unit = 'w'
+                            m.max_value = max(fv * 1.5, 10000)
+                    else:
+                        unit = ''
+                        max_val = max(fv * 1.5, 100)
+                        if fv >= 10000:
+                            unit = 'w'
+                            max_val = max(fv * 1.5, 10000)
+                        session.add(ObjectMetric(
+                            object_id=obj.id, key=key, name=key, unit=unit,
+                            max_value=max_val, show_in_chart=True
+                        ))
+                        print(f'  SAVE: 自动创建指标配置 key={key} max_value={max_val}')
+
             threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, session)
             if threshold_result:
                 result = threshold_result
@@ -1770,27 +1872,31 @@ def api_save():
             session.add(record)
             session.commit()
             saved += 1
+            last_object_id = obj.id
     except Exception as e:
         session.rollback()
         return jsonify({'error': f'保存失败: {str(e)}'}), 500
     finally:
         session.close()
 
-    return jsonify({'saved': saved, 'skipped': skipped, 'created': created})
+    return jsonify({'saved': saved, 'skipped': skipped, 'created': created, 'object_id': last_object_id})
 
 
-def _match_object(name, all_objects):
+def _match_object(name, all_objects, expected_type=None):
     """匹配巡检对象"""
     name_lower = name.lower()
     best = None
     best_score = 0
+    expected_lower = expected_type.lower() if expected_type else None
 
     for obj in all_objects:
+        if expected_lower and (obj.device_type or '').lower() != expected_lower:
+            continue
         score = 0
         obj_name_lower = (obj.name or '').lower()
         location_lower = (obj.location or '').lower()
 
-        if obj_name_lower and obj_name_lower in name_lower:
+        if obj_name_lower and (obj_name_lower in name_lower or name_lower in obj_name_lower):
             score += 20
         if location_lower and location_lower in name_lower:
             score += 10
@@ -1808,7 +1914,7 @@ def _match_object(name, all_objects):
     return None
 
 
-def _match_object_by_location(location, all_objects):
+def _match_object_by_location(location, all_objects, expected_type=None):
     """按位置匹配巡检对象"""
     if not location:
         return None
@@ -1816,8 +1922,11 @@ def _match_object_by_location(location, all_objects):
     location_lower = location.lower()
     best = None
     best_score = 0
+    expected_lower = expected_type.lower() if expected_type else None
 
     for obj in all_objects:
+        if expected_lower and (obj.device_type or '').lower() != expected_lower:
+            continue
         score = 0
         obj_location_lower = (obj.location or '').lower()
         obj_name_lower = (obj.name or '').lower()

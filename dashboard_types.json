@@ -3,6 +3,7 @@
     {
       "id": "monitor",
       "name": "监控",
+      "category": "监控",
       "description": "监控系统仪表盘",
       "detect_keywords": [
         "监控点总数",
@@ -26,6 +27,7 @@
     {
       "id": "vehicle",
       "name": "车辆",
+      "category": "车辆",
       "description": "车辆管理仪表盘",
       "detect_keywords": [
         "全部车辆",
@@ -47,6 +49,7 @@
     {
       "id": "badge",
       "name": "工牌",
+      "category": "工牌",
       "description": "工牌/账户设备仪表盘",
       "detect_keywords": [
         "工牌",
@@ -66,20 +69,40 @@
     {
       "id": "type_1782497693288",
       "name": "哔哩哔哩",
-      "description": "哔哩哔哩粉丝分析",
+      "category": "自媒体账号",
+      "description": "数据分析",
       "detect_keywords": [
-        "粉丝",
+        "获赞",
         "哔哩哔哩"
       ],
       "labels": {
-        "姓名": "昵称",
-        "粉丝": "粉丝",
         "关注": "关注",
-        "获赞": "zan"
+        "粉丝": "粉丝",
+        "获赞": "获赞"
       },
       "extra_labels": [],
       "result_rules": {},
-      "number_before_label": true
+      "number_before_label": true,
+      "name_from_first_line": true
+    },
+    {
+      "id": "type_1782622410786",
+      "name": "小红书",
+      "category": "自媒体账号",
+      "description": "数据分析",
+      "detect_keywords": [
+        "小红书",
+        "笔记",
+        "小红书号"
+      ],
+      "labels": {
+        "笔记": "笔记",
+        "粉丝": "粉丝"
+      },
+      "extra_labels": [],
+      "result_rules": {},
+      "number_before_label": false,
+      "name_from_first_line": true
     }
   ]
 }

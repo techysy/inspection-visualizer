@@ -267,6 +267,13 @@
 
     var metricsConfig = {{ metrics_config|tojson }};
 
+    function fmtVal(mc, raw) {
+        var n = parseFloat(raw);
+        if (isNaN(n)) return raw;
+        if (mc.unit === 'w') return (n / 10000) + 'w';
+        return n + (mc.unit || '');
+    }
+
     function loadInspectionHistory() {
         var objectId = {{ object.id }};
         fetch('/api/inspection_history/' + objectId)
@@ -293,7 +300,7 @@
                         metricsConfig.forEach(function(mc) {
                             var val = item.metrics[mc.name] || item.metrics[mc.key];
                             if (val !== undefined && val !== null && val !== '') {
-                                parts.push(mc.name + ': ' + val + (mc.unit ? mc.unit : ''));
+                                parts.push(mc.name + ': ' + fmtVal(mc, val));
                             }
                         });
                         if (parts.length > 0) metricsText = parts.join('; ');
@@ -336,6 +343,7 @@
                 var val = m[mc.name] || m[mc.key];
                 if (val === undefined || val === null || val === '') return null;
                 var num = parseFloat(String(val).replace(/[^0-9.\-]/g, '')) || null;
+                if (num !== null && mc.unit === 'w') num = num / 10000;
                 var mv = mc.max_value ? parseFloat(mc.max_value) : null;
                 if (num !== null && mv !== null && num > mv) return null;
                 return num;
@@ -375,9 +383,9 @@
                         },
                         y: {
                             beginAtZero: true,
-                            max: mc.max_value ? parseFloat(mc.max_value) * 1.2 : null,
+                            max: (function(){ var m = mc.max_value ? parseFloat(mc.max_value) : null; if (m === null) return null; var v = mc.unit === 'w' ? m / 10000 * 1.2 : m * 1.2; var mag = Math.pow(10, Math.floor(Math.log10(v))); var norm = v / mag; return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag; })(),
                             grid: { color: cv('--grid-line'), drawBorder: false },
-                            ticks: { color: cv('--text-dim'), font: { size: 10 }, callback: function(v) { var mv = mc.max_value ? parseFloat(mc.max_value) : null; if (mv !== null && v > mv) return ''; return v; } }
+                            ticks: { color: cv('--text-dim'), font: { size: 10 }, callback: function(v) { var mv = mc.max_value ? parseFloat(mc.max_value) : null; if (mc.unit === 'w') { mv = mv ? mv / 10000 : null; return v + 'w'; } if (mv !== null && v > mv) return ''; return v; } }
                         }
                     },
                     plugins: {
@@ -392,7 +400,7 @@
                             cornerRadius: 8,
                             callbacks: {
                                 title: function(items) { return items.length ? items[0].label : ''; },
-                                label: function(c) { return mc.name + ': ' + c.parsed.y + (mc.unit || ''); }
+                                label: function(c) { return mc.name + ': ' + (mc.unit === 'w' ? c.parsed.y + 'w' : c.parsed.y + (mc.unit || '')); }
                             }
                         }
                     }

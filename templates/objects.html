@@ -28,11 +28,8 @@
     <form method="POST" action="{{ url_for('main.object_add') }}" class="store-add-form">
         <input type="text" class="store-input" name="name" placeholder="名称" required style="flex:1 1 120px;min-width:0;">
         <input type="text" class="store-input" name="location" placeholder="位置" style="flex:1 1 80px;min-width:0;">
-        <select class="store-input" name="device_type" style="flex:1 1 80px;min-width:0;">
-            <option value="">类型</option>
-            {% for dtype in ['服务器', '网络设备', '存储', 'UPS', '空调', '监控', '其他'] %}
-            <option value="{{ dtype }}">{{ dtype }}</option>
-            {% endfor %}
+        <select class="store-input" name="device_type" id="obj-add-category" style="flex:1 1 80px;min-width:0;">
+            <option value="">分类</option>
         </select>
         <input type="text" class="store-input" name="description" placeholder="描述" style="flex:1 1 100px;min-width:0;">
         <button type="submit" class="store-add-btn">添加</button>
@@ -139,12 +136,9 @@
                                 <input type="text" class="form-control" name="location" value="{{ obj.location or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
                             </div>
                             <div class="col-6">
-                                <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">类型</label>
-                                <select class="form-select" name="device_type" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
+                                <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">分类</label>
+                                <select class="form-select" name="device_type" id="obj-edit-category-{{ obj.id }}" data-current="{{ obj.device_type or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
                                     <option value="">-</option>
-            {% for dtype in ['服务器', '网络设备', '存储', 'UPS', '空调', '监控', '车辆', '工牌', '其他'] %}
-                                    <option value="{{ dtype }}" {% if obj.device_type == dtype %}selected{% endif %}>{{ dtype }}</option>
-                                    {% endfor %}
                                 </select>
                             </div>
                             <div class="col-6">
@@ -193,6 +187,40 @@
 
 {% block extra_js %}
 <script>
+(function() {
+    fetch('/api/dashboard-types/categories').then(function(r) { return r.json(); }).then(function(cats) {
+        function fillSelect(sel, current) {
+            cats.forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = c; opt.textContent = c;
+                if (c === current) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            var addOpt = document.createElement('option');
+            addOpt.value = '__new__'; addOpt.textContent = '+ 新建分类...';
+            sel.appendChild(addOpt);
+            sel.addEventListener('change', function() {
+                if (this.value === '__new__') {
+                    var name = prompt('请输入新分类名称：');
+                    if (name && name.trim()) {
+                        var opt = document.createElement('option');
+                        opt.value = name.trim(); opt.textContent = name.trim();
+                        sel.insertBefore(opt, sel.lastElementChild);
+                        sel.value = name.trim();
+                    } else {
+                        this.value = current || '';
+                    }
+                }
+            });
+        }
+        var addSel = document.getElementById('obj-add-category');
+        if (addSel) fillSelect(addSel, '');
+        document.querySelectorAll('[id^="obj-edit-category-"]').forEach(function(sel) {
+            fillSelect(sel, sel.getAttribute('data-current') || '');
+        });
+    }).catch(function() {});
+})();
+
 function toggleMetrics(objectId) {
     var panel = document.getElementById('metrics-panel-' + objectId);
     if (panel.style.display === 'none') {

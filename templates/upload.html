@@ -168,14 +168,14 @@
         let best = null, bestScore = 0;
         const name = (item.point_name || '').toLowerCase();
         const location = (item.location || '').toLowerCase();
-        const dashType = item.dashboard_type || '';
-        const typeMap = { 'monitor': '监控', 'vehicle': '车辆', 'badge': '工牌' };
-        const expectedType = typeMap[dashType] || '';
+        const expectedType = item.dashboard_type_name || ({ 'monitor': '监控', 'vehicle': '车辆', 'badge': '工牌' }[item.dashboard_type] || '');
         for (const p of allPoints) {
+            if (expectedType && (!p.device_type || p.device_type.toLowerCase() !== expectedType)) continue;
             let score = 0;
+            let hasNameMatch = false;
             const pointName = (p.name || '').toLowerCase();
             const pLocation = (p.location || '').toLowerCase();
-            if (pointName && name.includes(pointName)) score += 20;
+            if (pointName && (name.includes(pointName) || pointName.includes(name))) { score += 20; hasNameMatch = true; }
             if (location && pLocation && location === pLocation) score += 30;
             else if (location && pLocation && location.includes(pLocation)) score += 20;
             else if (location && pLocation && pLocation.includes(location)) score += 15;
@@ -184,12 +184,10 @@
             if (p.device_type) {
                 const dtype = p.device_type.toLowerCase();
                 if (name.includes(dtype)) score += 5;
-                if (expectedType && dtype === expectedType) score += 40;
-                if (expectedType && dtype !== expectedType) score -= 30;
             }
-            if (score > bestScore) { bestScore = score; best = p; }
+            if (hasNameMatch && score > bestScore) { bestScore = score; best = p; }
         }
-        return bestScore >= 10 ? best : null;
+        return best;
     }
 
     function matchInspector(item) {
@@ -224,7 +222,12 @@
                 let opts = '<option value="">选择对象</option>';
                 const ocrName = (item.point_name || '').toLowerCase();
                 const ocrLocation = (item.location || '').toLowerCase();
-                const sorted = [...allPoints].sort((a, b) => {
+                const filterType = item.dashboard_type_name || '';
+                var filteredPoints = filterType
+                    ? allPoints.filter(function(p) { return (p.device_type || '').toLowerCase() === filterType.toLowerCase(); })
+                    : allPoints;
+                var noTypeMatch = filterType && filteredPoints.length === 0;
+                const sorted = [...filteredPoints].sort((a, b) => {
                     const aName = (a.name || '').toLowerCase();
                     const bName = (b.name || '').toLowerCase();
                     const aLoc = (a.location || '').toLowerCase();
@@ -237,16 +240,18 @@
                 });
                 let autoSelectedId = null;
                 sorted.forEach(p => {
-                    const isAutoSelected = (ocrName && p.name && ocrName.includes((p.name || '').toLowerCase())) ||
+                    const pName = (p.name || '').toLowerCase();
+                    const isAutoSelected = (ocrName && pName && (ocrName.includes(pName) || pName.includes(ocrName))) ||
                                            (ocrLocation && p.location && ocrLocation.includes((p.location || '').toLowerCase()));
                     const selected = isAutoSelected ? ' selected' : '';
                     if (isAutoSelected) autoSelectedId = p.id;
                     opts += `<option value="${p.id}"${selected}>${escHtml(p.name)} ${p.location ? '(' + escHtml(p.location) + ')' : ''}</option>`;
                 });
                 if (autoSelectedId) item.point_id = autoSelectedId;
+                var tip = noTypeMatch ? '暂无此类型对象，点击创建' : '快速创建巡检对象';
                 pointBadge = `<div class="point-select-group">
                     <select class="point-select" onchange="currentItems[${i}].point_id=this.value||null; this.className=this.value?'point-select point-ok':'point-select point-err';">${opts}</select>
-                    <button class="quick-create-btn" onclick="quickCreateObject(${i})" title="快速创建巡检对象">+</button>
+                    <button class="quick-create-btn" onclick="quickCreateObject(${i})" title="${tip}"${noTypeMatch ? ' style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;"' : ''}>+</button>
                 </div>`;
             }
 
@@ -263,10 +268,10 @@
                 inspectorBadge = '';
             }
 
+            var dashLabel = item.dashboard_type_name ? `<span style="font-size:0.7rem;color:var(--text-muted);margin-right:0.3rem;">[${escHtml(item.dashboard_type_name)}]</span>` : '';
             html += `<div class="ocr-card">
                 <div class="ocr-card-header">
-                    ${locationBadge}
-                    <input type="text" class="ocr-title-input" value="${escAttr(item.point_name)}" onchange="currentItems[${i}].point_name=this.value;">
+                    ${locationBadge}${dashLabel}<input type="text" class="ocr-title-input" value="${escAttr(item.point_name)}" onchange="currentItems[${i}].point_name=this.value;">
                     <div class="ocr-card-actions">${pointBadge}<button class="ocr-del-btn" onclick="removeItem(${i})">&#10005;</button></div>
                 </div>
                 <div class="ocr-card-body">
@@ -303,14 +308,16 @@
 
     window.quickCreateObject = function(idx) {
         const item = currentItems[idx];
-        const suggestedName = item.point_name || '';
-        const suggestedLocation = item.location || '';
+        const suggestedName = item.dashboard_type_name || '';
+        const suggestedLocation = item.point_name || '';
+        const deviceType = item.dashboard_category || '';
 
         const modal = document.createElement('div');
         modal.className = 'quick-create-modal';
         modal.innerHTML = `
             <div class="quick-create-dialog">
                 <h5>快速创建巡检对象</h5>
+                <input type="hidden" id="qc-device-type" value="${escAttr(deviceType)}">
                 <div class="mb-3">
                     <label class="form-label">名称 <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="qc-name" value="${escAttr(suggestedName)}" placeholder="输入巡检对象名称">
@@ -319,20 +326,8 @@
                     <label class="form-label">位置</label>
                     <input type="text" class="form-control" id="qc-location" value="${escAttr(suggestedLocation)}" placeholder="输入位置（可选）">
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">设备类型</label>
-                    <select class="form-select" id="qc-device-type">
-                        <option value="">无</option>
-                        <option value="监控">监控</option>
-                        <option value="服务器">服务器</option>
-                        <option value="网络设备">网络设备</option>
-                        <option value="存储">存储</option>
-                        <option value="UPS">UPS</option>
-                        <option value="空调">空调</option>
-                    </select>
-                </div>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-primary flex-fill" id="qc-confirm">创建并关联</button>
+                    <button class="btn btn-primary flex-fill" id="qc-confirm">创建并保存</button>
                     <button class="btn btn-outline-secondary" id="qc-cancel">取消</button>
                 </div>
                 <div id="qc-status" class="mt-2"></div>
@@ -367,11 +362,18 @@
                     statusEl.innerHTML = `<div class="text-danger">${data.error}</div>`;
                     return;
                 }
-                allPoints.push({id: data.id, name: data.name, location: modal.querySelector('#qc-location').value.trim()});
+                allPoints.push({id: data.id, name: data.name, location: modal.querySelector('#qc-location').value.trim(), device_type: modal.querySelector('#qc-device-type').value});
                 currentItems[idx].point_id = data.id;
+                if (item.dashboard_type_name) {
+                    fetch(`/api/objects/${data.id}/sync-metrics`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ dashboard_type_name: item.dashboard_type_name })
+                    });
+                }
                 modal.remove();
                 renderItems(currentItems);
-                ocrStatus.innerHTML = `<div class="alert alert-success">已创建对象 "${escHtml(data.name)}" 并关联</div>`;
+                ocrStatus.innerHTML = `<div class="alert alert-success">已创建对象 "${escHtml(data.name)}"，请点击「确认保存」</div>`;
             } catch(e) {
                 statusEl.innerHTML = `<div class="text-danger">创建失败: ${e.message}</div>`;
             }
@@ -396,7 +398,8 @@
             let msg = `成功保存 ${data.saved} 条巡检记录`;
             if (data.created > 0) msg += `，自动创建 ${data.created} 个新位置`;
             if (data.skipped > 0) msg += `，${data.skipped} 条未匹配到位置`;
-            saveStatus.innerHTML = `<div class="alert alert-success">${msg}</div>`;
+            var viewLink = data.object_id ? ` <a href="/object/${data.object_id}" class="btn btn-sm btn-outline-primary" style="text-decoration:none;">查看 →</a>` : '';
+            saveStatus.innerHTML = `<div class="alert alert-success">${msg}${viewLink}</div>`;
             btnSave.style.display = 'none';
         } catch(e) {
             saveStatus.innerHTML = `<div class="alert alert-danger">保存失败: ${e.message}</div>`;

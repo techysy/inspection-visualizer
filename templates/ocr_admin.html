@@ -163,6 +163,12 @@
             <input type="text" class="form-control" id="modal-type-desc" placeholder="如: 监控系统仪表盘">
         </div>
         <div class="mb-3">
+            <label class="form-label">分类</label>
+            <select class="form-control" id="modal-type-category">
+                <option value="">-</option>
+            </select>
+        </div>
+        <div class="mb-3">
             <label class="form-label">识别关键词 <small class="text-muted">（每行一个，包含任一即命中）</small></label>
             <textarea class="form-control" id="modal-type-keywords" rows="3" placeholder="监控点总数&#10;监控点在线率"></textarea>
         </div>
@@ -199,11 +205,36 @@
         <div id="modal-status" class="mt-2"></div>
     </div>
 </div>
+
+<!-- Toast 容器 -->
+<div class="toast-container position-fixed top-0 start-50 translate-middle-x mt-5 p-3" style="z-index:9999" id="toast-container"></div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function() {
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const styleMap = {
+            success: 'background:var(--success-bg);color:var(--success);border:1px solid var(--success-border)',
+            error:   'background:var(--danger-glow);color:var(--danger);border:1px solid var(--danger-border)',
+            info:    'background:var(--primary-soft);color:var(--accent);border:1px solid var(--primary-border)',
+            warning: 'background:rgba(250,204,21,0.12);color:#facc15;border:1px solid rgba(250,204,21,0.3)'
+        };
+        const iconMap = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
+        const icon = iconMap[type] || iconMap.info;
+        const style = styleMap[type] || styleMap.info;
+        const html = `<div class="toast align-items-center border-0 show" style="${style};border-radius:8px" role="alert">
+            <div class="d-flex">
+                <div class="toast-body"><strong>${icon}</strong> ${message}</div>
+                <button type="button" class="btn-close me-2 m-auto" style="filter:none;opacity:0.5" data-bs-dismiss="toast"></button>
+            </div>
+        </div>`;
+        container.insertAdjacentHTML('beforeend', html);
+        const el = container.lastElementChild;
+        setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 3500);
+    }
     const textScore = document.getElementById('text-score');
     const textScoreValue = document.getElementById('text-score-value');
     const useDet = document.getElementById('use-det');
@@ -289,9 +320,39 @@
             const resp = await fetch('/api/dashboard-types');
             allTypes = await resp.json();
             renderTypes();
+            loadCategories();
         } catch(e) {
             typesList.innerHTML = '<div class="text-danger">加载失败</div>';
         }
+    }
+
+    async function loadCategories() {
+        try {
+            const resp = await fetch('/api/dashboard-types/categories');
+            const cats = await resp.json();
+            const sel = document.getElementById('modal-type-category');
+            cats.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.textContent = c;
+                sel.appendChild(opt);
+            });
+            const addOpt = document.createElement('option');
+            addOpt.value = '__new__'; addOpt.textContent = '+ 新建分类...';
+            sel.appendChild(addOpt);
+            sel.addEventListener('change', function() {
+                if (this.value === '__new__') {
+                    const name = prompt('请输入新分类名称：');
+                    if (name && name.trim()) {
+                        const opt = document.createElement('option');
+                        opt.value = name.trim(); opt.textContent = name.trim();
+                        sel.insertBefore(opt, sel.lastElementChild);
+                        sel.value = name.trim();
+                    } else {
+                        sel.value = '';
+                    }
+                }
+            });
+        } catch(e) {}
     }
 
     function renderTypes() {
@@ -308,14 +369,16 @@
             const keywords = (t.detect_keywords || []).map(k =>
                 `<code>${escHtml(k)}</code>`
             ).join(' ');
+            const catTag = t.category ? `<span class="category-tag" style="border-color:${color}40;background:${color}12;color:${color}">${escHtml(t.category)}</span>` : '';
             return `<div class="type-card" style="border-left:3px solid ${color}">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
                         <span class="type-name">${escHtml(t.name)}</span>
+                        ${catTag}
                         <small class="text-muted ms-2">${escHtml(t.description || '')}</small>
                     </div>
                     <div class="d-flex gap-1 flex-shrink-0">
-                        <button class="btn btn-sm btn-outline-success py-0" style="font-size:0.75rem" onclick="syncType('${escAttr(t.id)}', this)">同步</button>
+                        <button class="btn btn-sm btn-outline-success py-0" style="font-size:0.75rem" title="从巡检对象同步指标到此类型" onclick="syncType('${escAttr(t.id)}', this)">同步</button>
                         <button class="btn btn-sm btn-outline-primary py-0" style="font-size:0.75rem" onclick="editType('${escAttr(t.id)}')">编辑</button>
                         <button class="btn btn-sm btn-outline-danger py-0" style="font-size:0.75rem" onclick="deleteType('${escAttr(t.id)}')">删除</button>
                     </div>
@@ -337,6 +400,7 @@
         document.getElementById('modal-type-id-input').disabled = true;
         document.getElementById('modal-type-name').value = t.name || '';
         document.getElementById('modal-type-desc').value = t.description || '';
+        document.getElementById('modal-type-category').value = t.category || '';
         document.getElementById('modal-type-keywords').value = (t.detect_keywords || []).join('\n');
         document.getElementById('modal-type-labels').value = Object.entries(t.labels || {}).map(([k, v]) => `${k}=${v}`).join('\n');
         document.getElementById('modal-type-extra-rate').checked = (t.extra_labels || []).includes('在线率');
@@ -353,10 +417,10 @@
         try {
             const resp = await fetch(`/api/dashboard-types/${id}`, { method: 'DELETE' });
             const data = await resp.json();
-            if (data.error) alert(data.error);
-            else loadTypes();
+            if (data.error) showToast(data.error, 'error');
+            else { loadTypes(); showToast('删除成功', 'success'); }
         } catch(e) {
-            alert('删除失败: ' + e.message);
+            showToast('删除失败: ' + e.message, 'error');
         }
     };
 
@@ -368,12 +432,13 @@
             const resp = await fetch(`/api/dashboard-types/${id}/sync`, { method: 'POST' });
             const data = await resp.json();
             if (data.error) {
-                alert(data.error);
+                showToast(data.error, 'error');
             } else {
                 loadTypes();
+                showToast('同步完成', 'success');
             }
         } catch(e) {
-            alert('同步失败: ' + e.message);
+            showToast('同步失败: ' + e.message, 'error');
         }
         btn.disabled = false;
         btn.textContent = originalText;
@@ -386,13 +451,13 @@
             const resp = await fetch('/api/dashboard-types/sync', { method: 'POST' });
             const data = await resp.json();
             if (data.error) {
-                alert(data.error);
+                showToast(data.error, 'error');
             } else {
-                alert(`同步完成：新建 ${data.created} 个，更新 ${data.updated} 个（共 ${data.total_objects} 个巡检对象）`);
+                showToast(`同步完成：新建 ${data.created} 个，更新 ${data.updated} 个（共 ${data.total_objects} 个巡检对象）`, 'success');
                 loadTypes();
             }
         } catch(e) {
-            alert('同步失败: ' + e.message);
+            showToast('同步失败: ' + e.message, 'error');
         }
         btnSyncTypes.disabled = false;
         btnSyncTypes.textContent = '同步指标';
@@ -405,6 +470,7 @@
         document.getElementById('modal-type-id-input').disabled = false;
         document.getElementById('modal-type-name').value = '';
         document.getElementById('modal-type-desc').value = '';
+        document.getElementById('modal-type-category').value = '';
         document.getElementById('modal-type-keywords').value = '';
         document.getElementById('modal-type-labels').value = '';
         document.getElementById('modal-type-extra-rate').checked = false;
@@ -518,6 +584,7 @@
             const payload = {
                 id: generatedId,
                 name: name,
+                category: document.getElementById('modal-type-category').value === '__new__' ? '' : document.getElementById('modal-type-category').value.trim(),
                 description: document.getElementById('modal-type-desc').value.trim(),
                 detect_keywords: document.getElementById('modal-type-keywords').value.split('\n').map(s => s.trim()).filter(Boolean),
                 labels: labels,
@@ -749,6 +816,15 @@
     border-radius: 4px;
     border: 1px solid;
 }
+.category-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    padding: 0.08rem 0.35rem;
+    margin-left: 0.3rem;
+    border-radius: 3px;
+    border: 1px solid;
+    vertical-align: middle;
+}
 .match-result {
     padding: 0.5rem 0.75rem;
     border-radius: 8px;
@@ -793,6 +869,17 @@
 .modal-dialog h5 {
     margin-bottom: 1rem;
     font-weight: 600;
+}
+.modal-dialog .form-label {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+.modal-dialog .form-control {
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 0.6rem 1rem;
 }
 .copy-box {
     position: relative;
