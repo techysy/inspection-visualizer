@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}{{ obj.name }} - 日列表历史{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <a href="/" class="back-link">&larr; 返回首页</a>
+        <h2 class="mt-2 mb-0">{{ obj.name }}</h2>
+        <small class="text-muted">{{ obj.location or '' }} {{ obj.device_type or '' }}</small>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h5 class="card-title mb-3">日列表历史（最近90天）</h5>
+        
+        {% if records|length == 0 %}
+            <div class="text-muted text-center py-4">暂无日列表记录</div>
+        {% else %}
+            <div class="table-responsive">
+                <table class="table table-hover" style="font-size:0.88rem">
+                    <thead>
+                        <tr>
+                            <th style="width:120px">日期</th>
+                            <th style="width:80px">人数</th>
+                            <th style="width:80px">变化</th>
+                            <th>成员列表</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in records %}
+                        <tr>
+                            <td>
+                                <strong>{{ r.date }}</strong>
+                                {% if r.created_at %}
+                                <br><small class="text-muted">{{ r.created_at }}</small>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge bg-primary" style="font-size:0.9rem">{{ r.count }}</span>
+                            </td>
+                            <td>
+                                {% set prev = records[loop.index] if loop.index < records|length else None %}
+                                {% if prev %}
+                                    {% set delta = r.count - prev.count %}
+                                    {% if delta > 0 %}
+                                        <span style="color:#22c55e;font-weight:600">+{{ delta }}</span>
+                                    {% elif delta < 0 %}
+                                        <span style="color:#ef4444;font-weight:600">{{ delta }}</span>
+                                    {% else %}
+                                        <span class="text-muted">0</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <details>
+                                    <summary style="cursor:pointer;color:var(--text-secondary)">
+                                        查看列表（{{ r.items|length }}人）
+                                    </summary>
+                                    <div class="mt-2" style="display:flex;flex-wrap:wrap;gap:6px">
+                                        {% for item in r.items %}
+                                        <span class="badge" style="background:var(--bg-elevated);color:var(--text);border:1px solid var(--border)">{{ item }}</span>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+    .back-link {
+        color: var(--text-link);
+        text-decoration: none;
+        font-size: 0.85rem;
+    }
+    .back-link:hover {
+        color: var(--text-link-hover);
+    }
+</style>
+{% endblock %}

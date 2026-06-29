@@ -83,11 +83,31 @@
 
         applyTheme(getSaved());
 
-        btn.addEventListener('click', function() {
-            const current = getSaved();
-            const next = themes[(themes.indexOf(current) + 1) % themes.length];
-            save(next);
-            applyTheme(next);
+        // 三连击进入 OCR 管理页面
+        let clickCount = 0;
+        let clickTimer = null;
+
+        btn.addEventListener('click', function(e) {
+            clickCount++;
+            if (clickCount === 3) {
+                // 三连击 → 进入 OCR 管理
+                clearTimeout(clickTimer);
+                clickCount = 0;
+                window.location.href = '/ocr-admin';
+                return;
+            }
+            // 重置计数器
+            clearTimeout(clickTimer);
+            clickTimer = setTimeout(() => {
+                if (clickCount < 3) {
+                    // 单击或双击 → 切换主题
+                    const current = getSaved();
+                    const next = themes[(themes.indexOf(current) + 1) % themes.length];
+                    save(next);
+                    applyTheme(next);
+                }
+                clickCount = 0;
+            }, 300);
         });
 
         window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function() {

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Date, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 import datetime
@@ -78,6 +78,26 @@ class Inspector(Base):
     inspection_records = relationship('InspectionRecord', back_populates='inspector')
 
 
+class DailyListRecord(Base):
+    """日列表快照（群成员、粉丝列表等计数模式数据）"""
+    __tablename__ = 'daily_list_records'
+
+    id = Column(Integer, primary_key=True)
+    object_id = Column(Integer, ForeignKey('inspection_objects.id'), nullable=False)
+    date = Column(Date, nullable=False)                      # 记录日期
+    content_type = Column(String(50), default='list')        # 内容类型
+    items = Column(Text)                                     # JSON 数组：去重后的列表
+    count = Column(Integer, default=0)                       # 去重后计数
+    raw_count = Column(Integer, default=0)                   # 原始识别条目数
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    inspection_object = relationship('InspectionObject')
+
+    __table_args__ = (
+        UniqueConstraint('object_id', 'date', 'content_type', name='uq_daily_list'),
+    )
+
+
 def init_db():
     Base.metadata.create_all(engine)
 
@@ -120,6 +140,15 @@ def init_db():
             'max_value': 'FLOAT DEFAULT 100',
             'show_in_chart': 'BOOLEAN DEFAULT 1',
             'sort_order': 'INTEGER DEFAULT 0',
+        },
+        'daily_list_records': {
+            'object_id': 'INTEGER NOT NULL',
+            'date': 'DATE NOT NULL',
+            'content_type': 'VARCHAR(50) DEFAULT \'list\'',
+            'items': 'TEXT',
+            'count': 'INTEGER DEFAULT 0',
+            'raw_count': 'INTEGER DEFAULT 0',
+            'created_at': 'DATETIME',
         },
     }
 

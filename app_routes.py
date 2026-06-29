@@ -2,12 +2,23 @@ import io
 import re
 import base64
 import tempfile
-from datetime import datetime
+import logging
+from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
 from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response
 from PIL import Image
-from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector, ObjectMetric
+from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector, ObjectMetric, DailyListRecord
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(Path(__file__).parent / 'app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 OCR_CONFIG_PATH = Path(__file__).parent / 'ocr_config.json'
 DASHBOARD_TYPES_PATH = Path(__file__).parent / 'dashboard_types.json'
@@ -175,11 +186,71 @@ def _check_metrics_thresholds(metrics, object_id, session):
     return worst_result if has_threshold else None
 
 
+def _evaluate_delta_rules(metrics, object_id, result_rules, session):
+    """根据日对比规则判断巡检结果（delta 操作符）"""
+    if not result_rules:
+        return None
+    
+    # 获取前一天的记录
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    
+    # 优先从 daily_list_records 获取前一天数据
+    prev_daily = session.query(DailyListRecord).filter(
+        DailyListRecord.object_id == object_id,
+        DailyListRecord.date < today
+    ).order_by(DailyListRecord.date.desc()).first()
+    
+    # 也检查 inspection_records
+    prev_record = session.query(InspectionRecord).filter(
+        InspectionRecord.object_id == object_id,
+        InspectionRecord.timestamp < datetime.now()
+    ).order_by(InspectionRecord.timestamp.desc()).first()
+    
+    # 获取前一天的值
+    prev_metrics = {}
+    if prev_daily:
+        try:
+            prev_metrics = json.loads(prev_daily.items) if prev_daily.items else {}
+            prev_metrics['当日人数'] = prev_daily.count
+        except:
+            pass
+    if prev_record and prev_record.metrics:
+        try:
+            prev_metrics.update(json.loads(prev_record.metrics))
+        except:
+            pass
+    
+    if not prev_metrics:
+        logger.info(f'  DELTA: 未找到前一天记录，跳过 delta 规则评估')
+        return None
+    
+    worst_result = None
+    for rule, outcome in result_rules.items():
+        # delta 规则：与前一天对比
+        m = re.match(r'^(\w+)_?delta([><=]+)([\d.]+)$', rule)
+        if m:
+            metric_key, op, threshold = m.group(1), m.group(2), float(m.group(3))
+            curr_val = metrics.get(metric_key, 0)
+            prev_val = prev_metrics.get(metric_key, 0)
+            try:
+                curr_val = float(curr_val)
+                prev_val = float(prev_val)
+            except (ValueError, TypeError):
+                continue
+            delta = curr_val - prev_val
+            logger.info(f'  DELTA: {metric_key} curr={curr_val} prev={prev_val} delta={delta}')
+            if _evaluate_comparison(delta, op, threshold):
+                worst_result = outcome
+                logger.info(f'  DELTA: 规则 {rule} -> {outcome}')
+    
+    return worst_result
+
+
 def _extract_location_from_lines(lines):
     """从行列表中提取位置信息"""
-    skip_words = ['监控点总数', '在线', '离线', '未检测', '监控点在线率', '默认区域设置', 'admin',
-                  '车辆总数', '在线车辆', '今日上线', '报警车辆', '全部车辆', '全部状态',
-                  '工牌', '全部', '未用', '请输入']
+    gvars = _load_global_vars()
+    skip_words = gvars.get('skip_words', _default_global_vars['skip_words'])
     
     # 优先从前面的行中提取位置（左上角区域）
     for i, line in enumerate(lines[:5]):  # 只检查前5行
@@ -214,24 +285,51 @@ def _extract_location_from_lines(lines):
     return ''
 
 
-# 位置名称映射（OCR识别结果 → 标准名称）
-LOCATION_ALIAS = {
-    '中江县综合行政执法局': '城区',
-    '中江县': '城区',
+GLOBAL_VARS_PATH = Path(__file__).parent / 'global_vars.json'
+
+_default_global_vars = {
+    'skip_words': [
+        '监控点总数', '在线', '离线', '未检测', '监控点在线率', '默认区域设置', 'admin',
+        '车辆总数', '在线车辆', '今日上线', '报警车辆', '全部车辆', '全部状态',
+        '工牌', '全部', '未用', '请输入'
+    ]
 }
 
 
-def normalize_location(name):
-    """标准化位置名称"""
-    if not name:
-        return name
-    for alias, standard in LOCATION_ALIAS.items():
-        if alias in name:
-            return standard
-    return name
+def _load_global_vars():
+    if GLOBAL_VARS_PATH.exists():
+        try:
+            with open(GLOBAL_VARS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            merged = dict(_default_global_vars)
+            merged.update(data)
+            return merged
+        except Exception:
+            pass
+    return dict(_default_global_vars)
 
 
-def parse_inspection_form(ocr_result):
+def _save_global_vars(data):
+    with open(GLOBAL_VARS_PATH, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _evaluate_comparison(val, op, threshold):
+    """通用比较函数，支持 >, <, >=, <=, == 运算符"""
+    if op == '>' and val > threshold:
+        return True
+    elif op == '<' and val < threshold:
+        return True
+    elif op == '>=' and val >= threshold:
+        return True
+    elif op == '<=' and val <= threshold:
+        return True
+    elif op == '==' and val == threshold:
+        return True
+    return False
+
+
+def parse_inspection_form(ocr_result, filename=None):
     """解析巡检表单/仪表盘 OCR 结果"""
     if not ocr_result:
         return []
@@ -245,13 +343,13 @@ def parse_inspection_form(ocr_result):
     all_text = '\n'.join(lines)
 
     # OCR 原始输出日志
-    print('=== OCR LINES ===')
+    logger.info('=== OCR LINES ===')
     for i, line in enumerate(lines):
-        print(f'  [{i}] {repr(line)}')
-    print('=== END ===')
+        logger.info(f'  [{i}] {repr(line)}')
+    logger.info('=== END ===')
 
     # 尝试解析仪表盘格式（监控系统截图）
-    dashboard_result = parse_dashboard_screenshot(all_text, lines)
+    dashboard_result = parse_dashboard_screenshot(all_text, lines, filename=filename)
     if dashboard_result:
         return [dashboard_result]
 
@@ -259,22 +357,35 @@ def parse_inspection_form(ocr_result):
     return parse_traditional_form(lines)
 
 
-def parse_dashboard_screenshot(all_text, lines):
+def parse_dashboard_screenshot(all_text, lines, filename=None):
     """解析仪表盘截图（使用可配置的仪表盘类型规则）"""
-    print(f'  PARSE: all_text={repr(all_text)}')
+    logger.info(f'  PARSE: all_text={repr(all_text)}')
+    if filename:
+        logger.info(f'  PARSE: filename={repr(filename)}')
 
     dashboard_types = _load_dashboard_types()
     matched_type = None
 
-    for dtype in dashboard_types:
-        keywords = dtype.get('detect_keywords', [])
-        if any(kw in all_text for kw in keywords):
-            matched_type = dtype
-            print(f'  PARSE: 检测到{dtype["name"]}仪表盘 (关键词: {keywords})')
-            break
+    # 0. 优先用文件名匹配（解决小字 OCR 识别不到的问题）
+    if filename:
+        for dtype in dashboard_types:
+            keywords = dtype.get('detect_keywords', [])
+            if any(kw in filename for kw in keywords):
+                matched_type = dtype
+                logger.info(f'  PARSE: 文件名匹配到 [{keywords}] -> {dtype["name"]}')
+                break
+
+    # 1. 没匹配到才走 OCR 文字匹配
+    if not matched_type:
+        for dtype in dashboard_types:
+            keywords = dtype.get('detect_keywords', [])
+            if any(kw in all_text for kw in keywords):
+                matched_type = dtype
+                logger.info(f'  PARSE: 检测到{dtype["name"]}仪表盘 (关键词: {keywords})')
+                break
 
     if not matched_type:
-        print('  PARSE: 未匹配到任何仪表盘类型')
+        logger.info('  PARSE: 未匹配到任何仪表盘类型')
         return None
 
     label_map = matched_type.get('labels', {})
@@ -297,7 +408,7 @@ def parse_dashboard_screenshot(all_text, lines):
             num = int(line)
             label = pending_labels.pop(0)
             metrics[label] = num
-            print(f'  PARSE: 纯数字 {num} -> {label}')
+            logger.info(f'  PARSE: 纯数字 {num} -> {label}')
             continue
 
         # 2) 匹配 "位置名（在线/总数）" 格式
@@ -308,7 +419,7 @@ def parse_dashboard_screenshot(all_text, lines):
             total_val = int(m.group(3))
             metrics['online'] = online_val
             metrics['total'] = total_val
-            print(f'  PARSE: 位置格式 {region_name} 在线={online_val} 总数={total_val}')
+            logger.info(f'  PARSE: 位置格式 {region_name} 在线={online_val} 总数={total_val}')
             pending_labels = []
             continue
 
@@ -317,9 +428,12 @@ def parse_dashboard_screenshot(all_text, lines):
         line_matched = False
         for label in sorted_labels:
             # 构建搜索模式：标签后跟可选分隔符 + 数值 + 可选单位
-            search_pattern = rf'{re.escape(label)}\s*[·.:：]?\s*([\d.]+)\s*([万亿]?)'
+            # 支持格式：标签 数字、标签：数字、标签(数字)、标签（数字）
+            sep = r'[(\（]?\s*[·.:：]?\s*'
+            end = r'\s*[)\）]?'
+            search_pattern = rf'{re.escape(label)}{sep}([\d.]+){end}\s*([万亿]?)'
             if number_before_label:
-                search_pattern = rf'([\d.]+)\s*([万亿]?)\s*[·.:：]?\s*{re.escape(label)}'
+                search_pattern = rf'([\d.]+)\s*([万亿]?)\s*{sep}{re.escape(label)}{end}'
             for m in re.finditer(search_pattern, line):
                 matched_label = label_map[label]
                 raw = m.group(1)
@@ -332,7 +446,7 @@ def parse_dashboard_screenshot(all_text, lines):
                     matched_val = int(float(raw))
                 metrics[matched_label] = matched_val
                 line_matched = True
-                print(f'  PARSE: {matched_label}={matched_val}')
+                logger.info(f'  PARSE: {matched_label}={matched_val}')
 
         if line_matched:
             pending_labels = []
@@ -359,17 +473,23 @@ def parse_dashboard_screenshot(all_text, lines):
         if known_total > 0:
             expected_online = round(known_total * rate_val / 100)
             expected_offline = max(0, known_total - expected_online - known_undetected)
-            print(f'  PARSE: 交叉校验 online {known_online}->{expected_online}, offline {known_offline}->{expected_offline}')
+            logger.info(f'  PARSE: 交叉校验 online {known_online}->{expected_online}, offline {known_offline}->{expected_offline}')
             metrics['online'] = expected_online
             metrics['offline'] = expected_offline
         elif known_online > 0 and rate_val == 100.0 and known_offline > 0:
-            print(f'  PARSE: 在线率100%, 修正 offline {known_offline}->0')
+            logger.info(f'  PARSE: 在线率100%, 修正 offline {known_offline}->0')
             metrics['offline'] = 0
 
     # 识别区域名称
-    if not region_name:
-        region_name = _extract_location_from_lines(lines)
-    region_name = normalize_location(region_name)
+    ocr_location = _extract_location_from_lines(lines)
+    if ocr_location:
+        logger.info(f'  PARSE: 从OCR文本提取位置: {ocr_location}')
+    region_name = ocr_location
+    if not region_name and filename:
+        region_name = _extract_location_from_lines([filename])
+        if region_name:
+            logger.info(f'  PARSE: 从文件名提取位置: {region_name}')
+
 
     # 从OCR文本中提取截图日期
     screenshot_date = None
@@ -384,7 +504,7 @@ def parse_dashboard_screenshot(all_text, lines):
                 y, mo, d = int(tm.group(1)), int(tm.group(2)), int(tm.group(3))
                 if 2020 <= y <= 2099 and 1 <= mo <= 12 and 1 <= d <= 31:
                     screenshot_date = f'{y}-{mo:02d}-{d:02d}'
-                    print(f'  PARSE: 识别到截图日期 {screenshot_date}')
+                    logger.info(f'  PARSE: 识别到截图日期 {screenshot_date}')
                     break
             except (ValueError, IndexError):
                 pass
@@ -396,6 +516,8 @@ def parse_dashboard_screenshot(all_text, lines):
     reverse_label_map = {v: k for k, v in label_map.items()}
     status_detail_parts = []
     for key, val in metrics.items():
+        if key.startswith('_'):
+            continue  # 跳过临时字段
         label_name = reverse_label_map.get(key, key)
         status_detail_parts.append(f'{label_name}: {val}')
     if online_rate:
@@ -405,21 +527,34 @@ def parse_dashboard_screenshot(all_text, lines):
     result = '正常'
     result_rules = matched_type.get('result_rules', {})
     for rule, outcome in result_rules.items():
+        # delta 规则：与前一天对比
+        m = re.match(r'^(\w+)_?delta([><=]+)([\d.]+)$', rule)
+        if m:
+            metric_key, op, threshold = m.group(1), m.group(2), float(m.group(3))
+            val = metrics.get(metric_key, 0)
+            # delta 值会在保存时计算，这里先跳过
+            logger.info(f'  PARSE: delta 规则 {rule}（保存时评估）')
+            continue
+        
+        # abs 规则：绝对值阈值
+        m = re.match(r'^(\w+)_?abs([><=]+)([\d.]+)$', rule)
+        if m:
+            metric_key, op, threshold = m.group(1), m.group(2), float(m.group(3))
+            val = metrics.get(metric_key, 0)
+            if _evaluate_comparison(val, op, threshold):
+                result = outcome
+                logger.info(f'  PARSE: abs 规则 {rule} -> {outcome}')
+            continue
+
+        # 原有规则：直接比较（key 不存在则跳过）
         m = re.match(r'^(\w+)([><=]+)([\d.]+)$', rule)
         if not m:
             continue
         metric_key, op, threshold = m.group(1), m.group(2), float(m.group(3))
-        val = metrics.get(metric_key, 0)
-        if op == '>' and val > threshold:
-            result = outcome
-            break
-        elif op == '<' and val < threshold:
-            result = outcome
-            break
-        elif op == '>=' and val >= threshold:
-            result = outcome
-            break
-        elif op == '<=' and val <= threshold:
+        if metric_key not in metrics:
+            continue
+        val = metrics[metric_key]
+        if _evaluate_comparison(val, op, threshold):
             result = outcome
             break
 
@@ -444,11 +579,12 @@ def parse_dashboard_screenshot(all_text, lines):
     point_name = ''
     if name_from_first_line and unmatched_lines:
         point_name = unmatched_lines[0]
-        print(f'  PARSE: 从首行提取名称: {point_name}')
+        logger.info(f'  PARSE: 从首行提取名称: {point_name}')
 
-    return {
+    result_data = {
         'point_name': point_name,
         'location': region_name,
+        'ocr_location': ocr_location or '',
         'result': result,
         'status_detail': '; '.join(status_detail_parts),
         'notes': '',
@@ -458,7 +594,10 @@ def parse_dashboard_screenshot(all_text, lines):
         'dashboard_type': matched_type['id'],
         'dashboard_type_name': matched_type['name'],
         'dashboard_category': matched_type.get('category', matched_type['name']),
+        'skip_location_match': matched_type.get('skip_location_match', False),
     }
+
+    return result_data
 
 
 def parse_traditional_form(lines):
@@ -561,7 +700,15 @@ def index():
                 'object': obj,
                 'latest_record': latest_record,
             })
-        return render_template('index.html', object_data=object_data)
+        # 收集所有不重复的 device_type 和 location
+        all_types = sorted(set(
+            obj.device_type for obj in objects if obj.device_type
+        ))
+        all_locations = sorted(set(
+            obj.location for obj in objects if obj.location
+        ))
+        return render_template('index.html', object_data=object_data,
+                               all_device_types=all_types, all_locations=all_locations)
     finally:
         session.close()
 
@@ -589,6 +736,7 @@ def object_detail(object_id):
         total_records = len(records)
         normal_count = sum(1 for r in records if r.result == '正常')
         abnormal_count = sum(1 for r in records if r.result == '异常')
+        warn_count = sum(1 for r in records if r.result == '需关注')
 
         # 按结果分组，用于图表（同时间的记录加偏移避免重叠）
         result_timeline = {}
@@ -600,9 +748,10 @@ def object_detail(object_id):
             ts_ms = int(record.timestamp.timestamp() * 1000)
             offset = ts_counter.get(ts_ms, 0)
             ts_counter[ts_ms] = offset + 1
+            status_y = {'正常': 1, '异常': 0, '需关注': 0.5}
             result_timeline[result_key].append({
                 'x': ts_ms + offset * 60000,
-                'y': 1 if record.result == '正常' else 0,
+                'y': status_y.get(record.result, 0.5),
                 'result': record.result,
                 'inspector': record.inspector.name if record.inspector else (default_inspector.name if default_inspector else '未知'),
             })
@@ -626,6 +775,7 @@ def object_detail(object_id):
             total_records=total_records,
             normal_count=normal_count,
             abnormal_count=abnormal_count,
+            warn_count=warn_count,
             result_timeline=result_timeline,
             metrics_config=metrics_config
         )
@@ -694,6 +844,7 @@ def objects():
         for obj in object_list:
             if obj.created_at:
                 obj.created_at = obj.created_at + timedelta(hours=8)
+        
         return render_template('objects.html', objects=object_list)
     finally:
         session.close()
@@ -1006,6 +1157,124 @@ def api_re_evaluate_records(object_id):
         session.close()
 
 
+@main.route('/daily-list/<int:object_id>')
+def daily_list(object_id):
+    """日列表历史页面（群成员、粉丝列表等）"""
+    session = SessionLocal()
+    try:
+        obj = session.query(InspectionObject).get(object_id)
+        if not obj:
+            flash('对象不存在', 'error')
+            return redirect(url_for('main.index'))
+        
+        # 获取日列表记录，按日期倒序
+        records = session.query(DailyListRecord).filter_by(
+            object_id=object_id
+        ).order_by(DailyListRecord.date.desc()).limit(90).all()
+        
+        # 解析每条记录的 items
+        record_data = []
+        for r in records:
+            try:
+                items = json.loads(r.items) if r.items else []
+            except:
+                items = []
+            record_data.append({
+                'date': r.date.isoformat() if r.date else '',
+                'count': r.count,
+                'raw_count': r.raw_count,
+                'items': items,
+                'created_at': r.created_at.strftime('%H:%M') if r.created_at else ''
+            })
+        
+        return render_template('daily_list.html', obj=obj, records=record_data)
+    finally:
+        session.close()
+
+
+@main.route('/api/daily-list/<int:object_id>')
+def api_daily_list(object_id):
+    """日列表历史 API"""
+    session = SessionLocal()
+    try:
+        days = request.args.get('days', 30, type=int)
+        cutoff_date = date.today() - timedelta(days=days)
+        
+        records = session.query(DailyListRecord).filter(
+            DailyListRecord.object_id == object_id,
+            DailyListRecord.date >= cutoff_date
+        ).order_by(DailyListRecord.date.desc()).all()
+        
+        result = []
+        for r in records:
+            try:
+                items = json.loads(r.items) if r.items else []
+            except:
+                items = []
+            result.append({
+                'date': r.date.isoformat() if r.date else '',
+                'count': r.count,
+                'raw_count': r.raw_count,
+                'items': items,
+            })
+        
+        return jsonify(result)
+    finally:
+        session.close()
+
+
+@main.route('/api/import-group-members', methods=['POST'])
+def api_import_group_members():
+    """导入群成员文本到日列表"""
+    data = request.get_json()
+    if not data or 'object_id' not in data or 'items' not in data:
+        return jsonify({'error': '缺少参数'}), 400
+    
+    object_id = data['object_id']
+    items = data['items']
+    
+    if not items:
+        return jsonify({'error': '成员列表为空'}), 400
+    
+    session = SessionLocal()
+    try:
+        obj = session.query(InspectionObject).get(object_id)
+        if not obj:
+            return jsonify({'error': '巡检对象不存在'}), 400
+        
+        today = date.today()
+        unique_items = list(dict.fromkeys(items))  # 去重保持顺序
+        
+        # UPSERT
+        existing = session.query(DailyListRecord).filter_by(
+            object_id=object_id, date=today, content_type='list'
+        ).first()
+        
+        if existing:
+            existing.items = json.dumps(unique_items, ensure_ascii=False)
+            existing.count = len(unique_items)
+            existing.raw_count = len(items)
+        else:
+            record = DailyListRecord(
+                object_id=object_id,
+                date=today,
+                content_type='list',
+                items=json.dumps(unique_items, ensure_ascii=False),
+                count=len(unique_items),
+                raw_count=len(items)
+            )
+            session.add(record)
+        
+        session.commit()
+        logger.info(f'  IMPORT: 群成员导入 obj_id={object_id} count={len(unique_items)}')
+        return jsonify({'count': len(unique_items), 'object_id': object_id})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
 @main.route('/inspectors')
 def inspectors():
     """巡检人员管理页面"""
@@ -1300,6 +1569,8 @@ def api_ocr():
     if ',' in image_data:
         image_data = image_data.split(',', 1)[1]
 
+    filename = data.get('filename', '')  # 获取文件名
+
     config = _load_ocr_config()
     ignore_top = config.get('ignore_top', 0)
     ignore_bottom = config.get('ignore_bottom', 0)
@@ -1329,7 +1600,7 @@ def api_ocr():
                     continue
             filtered_result.append(item)
 
-    items = parse_inspection_form(filtered_result)
+    items = parse_inspection_form(filtered_result, filename=filename)
     return jsonify({'items': items, 'raw_lines': [item[1] for item in filtered_result if item]})
 
 
@@ -1390,6 +1661,28 @@ def api_ocr_config_save():
     return jsonify({'ok': True, 'config': config})
 
 
+@main.route('/api/global-vars', methods=['GET'])
+def api_global_vars_get():
+    """获取全局变量配置"""
+    return jsonify(_load_global_vars())
+
+
+@main.route('/api/global-vars', methods=['POST'])
+def api_global_vars_save():
+    """保存全局变量配置"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请提供配置数据'}), 400
+
+    current = _load_global_vars()
+    current.update(data)
+    try:
+        _save_global_vars(current)
+    except Exception as e:
+        return jsonify({'error': f'保存失败: {str(e)}'}), 500
+    return jsonify({'ok': True, 'config': current})
+
+
 @main.route('/api/dashboard-types', methods=['GET'])
 def api_dashboard_types_list():
     """获取所有仪表盘类型"""
@@ -1429,6 +1722,8 @@ def api_dashboard_types_add():
         'labels': data.get('labels', {}),
         'extra_labels': data.get('extra_labels', []),
         'result_rules': data.get('result_rules', {}),
+        'number_before_label': data.get('number_before_label', False),
+        'skip_location_match': data.get('skip_location_match', False),
     }
     types_list.append(new_type)
     _save_dashboard_types(types_list)
@@ -1454,6 +1749,7 @@ def api_dashboard_types_update(type_id):
                 'extra_labels': data.get('extra_labels', t.get('extra_labels', [])),
                 'result_rules': data.get('result_rules', t.get('result_rules', {})),
                 'number_before_label': data.get('number_before_label', t.get('number_before_label', False)),
+                'skip_location_match': data.get('skip_location_match', t.get('skip_location_match', False)),
             })
             _save_dashboard_types(types_list)
             return jsonify({'ok': True, 'type': types_list[i]})
@@ -1754,7 +2050,7 @@ def api_save():
                 try:
                     obj = session.query(InspectionObject).get(int(front_point_id))
                     if obj and dashboard_category and (obj.device_type or '') != dashboard_category:
-                        print(f'  SAVE: 前端选择对象 device_type={obj.device_type} 与类别 {dashboard_category} 不匹配，忽略')
+                        logger.info(f'  SAVE: 前端选择对象 device_type={obj.device_type} 与类别 {dashboard_category} 不匹配，忽略')
                         obj = None
                 except (ValueError, TypeError):
                     obj = None
@@ -1825,6 +2121,18 @@ def api_save():
             # 根据指标阈值重新判断结果
             parsed_metrics = _parse_status_to_metrics(status_detail)
 
+            # 获取仪表盘类型ID，用于构建标签映射
+            dashboard_type_id = item.get('dashboard_type', '')
+
+            # 构建中文标签 -> 短key 的反向映射（用于匹配已有指标）
+            label_to_key = {}
+            if dashboard_type_id:
+                dashboard_types = _load_dashboard_types()
+                matched_dtype = next((dt for dt in dashboard_types if dt.get('id') == dashboard_type_id), None)
+                if matched_dtype:
+                    for short_key, cn_label in matched_dtype.get('labels', {}).items():
+                        label_to_key[cn_label] = short_key
+
             # 自动创建指标配置（如果不存在）
             if parsed_metrics:
                 existing_metrics = {m.key: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
@@ -1833,8 +2141,11 @@ def api_save():
                         fv = float(val)
                     except (ValueError, TypeError):
                         continue
-                    if key in existing_metrics:
-                        m = existing_metrics[key]
+                    # 用中文标签对应的短key去匹配已有指标
+                    mapped_key = label_to_key.get(key, key)
+                    match_key = mapped_key if mapped_key in existing_metrics else key
+                    if match_key in existing_metrics:
+                        m = existing_metrics[match_key]
                         new_max = max(fv * 1.5, 100)
                         if m.unit == 'w':
                             new_max = max(fv * 1.5, 10000)
@@ -1850,14 +2161,24 @@ def api_save():
                             unit = 'w'
                             max_val = max(fv * 1.5, 10000)
                         session.add(ObjectMetric(
-                            object_id=obj.id, key=key, name=key, unit=unit,
+                            object_id=obj.id, key=mapped_key, name=mapped_key, unit=unit,
                             max_value=max_val, show_in_chart=True
                         ))
-                        print(f'  SAVE: 自动创建指标配置 key={key} max_value={max_val}')
+                        logger.info(f'  SAVE: 自动创建指标配置 key={mapped_key} max_value={max_val}')
 
             threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, session)
             if threshold_result:
                 result = threshold_result
+
+            # delta 规则评估（日对比）
+            if dashboard_type_id:
+                dashboard_types = _load_dashboard_types()
+                matched_dtype = next((dt for dt in dashboard_types if dt.get('id') == dashboard_type_id), None)
+                if matched_dtype:
+                    result_rules = matched_dtype.get('result_rules', {})
+                    delta_result = _evaluate_delta_rules(parsed_metrics, obj.id, result_rules, session)
+                    if delta_result:
+                        result = delta_result
 
             record = InspectionRecord(
                 point_id=obj.id,
@@ -1870,6 +2191,36 @@ def api_save():
                 timestamp=timestamp
             )
             session.add(record)
+
+            # 计数模式：保存日列表记录
+            list_items = item.get('_list_items', [])
+            if list_items:
+                today = date.today()
+                raw_count = item.get('_raw_count', len(list_items))
+                unique_count = len(list_items)
+                
+                # UPSERT：同一天同一对象更新
+                existing_daily = session.query(DailyListRecord).filter_by(
+                    object_id=obj.id, date=today, content_type='list'
+                ).first()
+                
+                if existing_daily:
+                    existing_daily.items = json.dumps(list_items, ensure_ascii=False)
+                    existing_daily.count = unique_count
+                    existing_daily.raw_count = raw_count
+                    logger.info(f'  SAVE: 更新日列表记录 obj_id={obj.id} date={today} count={unique_count}')
+                else:
+                    daily_record = DailyListRecord(
+                        object_id=obj.id,
+                        date=today,
+                        content_type='list',
+                        items=json.dumps(list_items, ensure_ascii=False),
+                        count=unique_count,
+                        raw_count=raw_count
+                    )
+                    session.add(daily_record)
+                    logger.info(f'  SAVE: 新增日列表记录 obj_id={obj.id} date={today} count={unique_count}')
+
             session.commit()
             saved += 1
             last_object_id = obj.id

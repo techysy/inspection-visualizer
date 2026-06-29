@@ -22,3 +22,7 @@ Thumbs.db
 
 # Environment
 .env
+
+# Runtime
+server.pid
+*.log

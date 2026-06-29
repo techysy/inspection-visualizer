@@ -66,6 +66,7 @@
 
     let currentImage = null;
     let currentItems = [];
+    let currentFilename = '';
 
     dropZone.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
@@ -90,6 +91,8 @@
 
     function handleFile(file) {
         if (!file || !file.type.startsWith('image/')) return;
+        // 提取文件名（去掉扩展名）
+        currentFilename = file.name ? file.name.replace(/\.[^.]+$/, '') : '';
         const reader = new FileReader();
         reader.onload = (e) => {
             currentImage = e.target.result;
@@ -107,6 +110,7 @@
 
     btnClear.addEventListener('click', () => {
         currentImage = null;
+        currentFilename = '';
         previewContainer.style.display = 'none';
         dropZone.style.display = 'block';
         ocrResults.innerHTML = '';
@@ -127,7 +131,7 @@
             const resp = await fetch('/api/ocr', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({image: currentImage})
+                body: JSON.stringify({image: currentImage, filename: currentFilename})
             });
             const data = await resp.json();
             if (data.error) {
@@ -167,25 +171,33 @@
     function matchPoint(item) {
         let best = null, bestScore = 0;
         const name = (item.point_name || '').toLowerCase();
-        const location = (item.location || '').toLowerCase();
-        const expectedType = item.dashboard_type_name || ({ 'monitor': '监控', 'vehicle': '车辆', 'badge': '工牌' }[item.dashboard_type] || '');
+        const skipLocation = item.skip_location_match;
+        const location = skipLocation ? '' : (item.location || '').toLowerCase();
+        const ocrLocation = skipLocation ? '' : (item.ocr_location || '').toLowerCase();
+        const expectedType = item.dashboard_category || item.dashboard_type_name || ({ 'monitor': '监控', 'vehicle': '车辆', 'badge': '工牌' }[item.dashboard_type] || '');
         for (const p of allPoints) {
-            if (expectedType && (!p.device_type || p.device_type.toLowerCase() !== expectedType)) continue;
+            if (expectedType && (!p.device_type || p.device_type.toLowerCase() !== expectedType.toLowerCase())) continue;
             let score = 0;
             let hasNameMatch = false;
+            let hasLocationMatch = false;
             const pointName = (p.name || '').toLowerCase();
             const pLocation = (p.location || '').toLowerCase();
             if (pointName && (name.includes(pointName) || pointName.includes(name))) { score += 20; hasNameMatch = true; }
-            if (location && pLocation && location === pLocation) score += 30;
-            else if (location && pLocation && location.includes(pLocation)) score += 20;
-            else if (location && pLocation && pLocation.includes(location)) score += 15;
+            if (location && pLocation && location === pLocation) { score += 30; hasLocationMatch = true; }
+            else if (location && pLocation && location.includes(pLocation)) { score += 20; hasLocationMatch = true; }
+            else if (location && pLocation && pLocation.includes(location)) { score += 15; hasLocationMatch = true; }
+            else if (ocrLocation && pLocation && ocrLocation === pLocation) { score += 30; hasLocationMatch = true; }
+            else if (ocrLocation && pLocation && ocrLocation.includes(pLocation)) { score += 20; hasLocationMatch = true; }
+            else if (ocrLocation && pLocation && pLocation.includes(ocrLocation)) { score += 15; hasLocationMatch = true; }
             if (location && pointName && location.includes(pointName)) score += 10;
             if (location && pointName && pointName.includes(location)) score += 25;
+            if (ocrLocation && pointName && ocrLocation.includes(pointName)) score += 10;
+            if (ocrLocation && pointName && pointName.includes(ocrLocation)) score += 25;
             if (p.device_type) {
                 const dtype = p.device_type.toLowerCase();
                 if (name.includes(dtype)) score += 5;
             }
-            if (hasNameMatch && score > bestScore) { bestScore = score; best = p; }
+            if ((hasNameMatch || hasLocationMatch) && score > bestScore) { bestScore = score; best = p; }
         }
         return best;
     }
@@ -214,7 +226,12 @@
                 ? '<span class="result-badge result-err">异常</span>'
                 : '<span class="result-badge result-warn">需关注</span>';
 
-            let locationBadge = matchedPoint && matchedPoint.location ? `<span class="location-badge">${escHtml(matchedPoint.location)}</span>` : '';
+            let locationBadge = '';
+            if (item.location) {
+                locationBadge = `<span class="location-badge">${escHtml(item.location)}</span>`;
+            } else if (matchedPoint && matchedPoint.location) {
+                locationBadge = `<span class="location-badge">${escHtml(matchedPoint.location)}</span>`;
+            }
             let pointBadge;
             if (matchedPoint) {
                 pointBadge = `<span class="point-badge">${escHtml(matchedPoint.name)}</span>`;
@@ -268,16 +285,24 @@
                 inspectorBadge = '';
             }
 
-            var dashLabel = item.dashboard_type_name ? `<span style="font-size:0.7rem;color:var(--text-muted);margin-right:0.3rem;">[${escHtml(item.dashboard_type_name)}]</span>` : '';
+            var dashLabel = item.dashboard_type_name ? `<span class="dashboard-badge">${escHtml(item.dashboard_category || item.dashboard_type_name)}</span>` : '';
+            var leftBadge = matchedPoint ? `<span class="point-badge">${escHtml(matchedPoint.name)}</span>` : '';
+            var locationCatBadge = '';
+            var locText = item.location || (matchedPoint && matchedPoint.location) || '';
+            if (locText || dashLabel) {
+                locationCatBadge = `<span class="location-cat-badge">${escHtml(locText)}${dashLabel ? ' ' + escHtml(item.dashboard_category || item.dashboard_type_name) : ''}</span>`;
+            }
             html += `<div class="ocr-card">
                 <div class="ocr-card-header">
-                    ${locationBadge}${dashLabel}<input type="text" class="ocr-title-input" value="${escAttr(item.point_name)}" onchange="currentItems[${i}].point_name=this.value;">
-                    <div class="ocr-card-actions">${pointBadge}<button class="ocr-del-btn" onclick="removeItem(${i})">&#10005;</button></div>
+                    ${leftBadge}
+                    <input type="text" class="ocr-title-input" value="${escAttr(item.point_name)}" onchange="currentItems[${i}].point_name=this.value;">
+                    <div class="ocr-card-actions">${matchedPoint ? '' : pointBadge}<button class="ocr-del-btn" onclick="removeItem(${i})">&#10005;</button></div>
                 </div>
                 <div class="ocr-card-body">
                     <span class="ocr-time">${escHtml(timestamp)}</span>
                     ${resultBadge}
                     ${inspectorBadge}
+                    ${locationCatBadge}
                     ${item.status_detail ? `<span class="ocr-status-detail">${escHtml(item.status_detail)}</span>` : ''}
                 </div>
             </div>`;
@@ -308,8 +333,8 @@
 
     window.quickCreateObject = function(idx) {
         const item = currentItems[idx];
-        const suggestedName = item.dashboard_type_name || '';
-        const suggestedLocation = item.point_name || '';
+        const suggestedName = item.ocr_location || item.location || item.point_name || '';
+        const suggestedLocation = item.ocr_location || item.location || '';
         const deviceType = item.dashboard_category || '';
 
         const modal = document.createElement('div');
@@ -514,6 +539,28 @@
 .point-select.point-err {
     border-color: var(--danger-border);
     color: var(--danger);
+}
+.dashboard-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    background: var(--accent-soft, rgba(0,150,255,0.12));
+    color: var(--accent, #0096ff);
+    border: 1px solid var(--accent-border, rgba(0,150,255,0.25));
+    white-space: nowrap;
+}
+.location-cat-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+    background: rgba(99,102,241,0.12);
+    color: #6366f1;
+    border: 1px solid rgba(99,102,241,0.25);
+    white-space: nowrap;
 }
 .inspector-badge {
     display: inline-block;

@@ -2,15 +2,15 @@
   "types": [
     {
       "id": "monitor",
-      "name": "监控",
+      "name": "智慧城管平台",
       "category": "监控",
       "description": "监控系统仪表盘",
       "detect_keywords": [
-        "监控点总数",
-        "监控点在线率"
+        "监控点",
+        "智慧城管平台",
+        "在线率"
       ],
       "labels": {
-        "监控点总数": "total",
         "在线": "online",
         "离线": "offline",
         "未检测": "undetected"
@@ -22,49 +22,48 @@
         "offline>0": "异常",
         "online_rate<90": "异常",
         "online_rate<95": "需关注"
-      }
+      },
+      "number_before_label": false,
+      "skip_location_match": false
     },
     {
       "id": "vehicle",
-      "name": "车辆",
+      "name": "环卫车辆管理",
       "category": "车辆",
       "description": "车辆管理仪表盘",
       "detect_keywords": [
-        "全部车辆",
-        "车辆总数",
-        "在线车辆",
-        "报警车辆"
+        "行驶车辆",
+        "环卫车辆管理",
+        "在线车辆"
       ],
       "labels": {
-        "车辆总数": "total",
-        "在线车辆": "online",
-        "今日上线": "today_online",
-        "报警车辆": "alarm"
+        "在线车辆": "在线车辆",
+        "行驶车辆": "行驶车辆"
       },
       "extra_labels": [],
       "result_rules": {
         "alarm>0": "异常"
-      }
+      },
+      "number_before_label": false,
+      "skip_location_match": true
     },
     {
       "id": "badge",
-      "name": "工牌",
+      "name": "环卫工牌系统",
       "category": "工牌",
       "description": "工牌/账户设备仪表盘",
       "detect_keywords": [
         "工牌",
-        "账户设备"
+        "IMEI号",
+        "环卫工牌系统"
       ],
       "labels": {
-        "全部": "total",
-        "在线": "online",
-        "离线": "offline",
-        "未用": "unused"
+        "在线": "在线"
       },
       "extra_labels": [],
-      "result_rules": {
-        "offline>0": "异常"
-      }
+      "result_rules": {},
+      "number_before_label": false,
+      "skip_location_match": false
     },
     {
       "id": "type_1782497693288",

@@ -11,12 +11,14 @@
 - 📊 **仪表盘解析**：支持自定义仪表盘类型，自动识别并提取结构化指标，支持分类管理
 - ⚙️ **指标配置**：为每个巡检对象配置需要跟踪的指标（名称、单位），可单独开关是否参与图表可视化
 - 📦 **对象管理**：管理巡检对象，支持分类关联仪表盘类型，支持一键复制
-- 📈 **趋势图表**：Chart.js 折线图展示巡检结果历史趋势 + 指标趋势
+- 📈 **趋势图表**：Chart.js 折线图展示巡检结果历史趋势（正常/异常/需关注三状态）+ 指标趋势
 - 👥 **人员管理**：管理巡检人员/班组信息
 - 🎨 **主题切换**：深色 / 浅色 / 跟随系统，偏好本地保存
 - 🔎 **双维度筛选**：按位置 + 分类组合筛选巡检对象
 - 📤 **数据导出**：下拉菜单导出为 JSON / 自包含 HTML 文件
 - 📥 **批量导入**：支持 Markdown 表格、CSV、JSON 格式，两步操作（识别预览 → 确认导入）
+- 🔧 **全局变量**：可配置 OCR 位置提取时的跳过关键词
+- 🚫 **位置匹配开关**：仪表盘类型可设置「不使用位置匹配」，仅通过类型分类匹配
 
 ## 🛠️ 技术栈
 
@@ -130,6 +132,10 @@ inspection-visualizer/
 ├── requirements.txt        # Python 依赖
 ├── start.ps1               # PowerShell 启动脚本（交互式菜单）
 ├── start.bat               # CMD 启动脚本
+├── dashboard_types.json    # 仪表盘类型配置（关键词/标签映射/结果规则）
+├── ocr_config.json         # OCR 引擎参数配置
+├── global_vars.json        # 全局变量配置（跳过关键词等）
+├── app.log                 # 运行日志
 │
 ├── models/
 │   ├── __init__.py
@@ -143,7 +149,7 @@ inspection-visualizer/
 │   ├── objects.html        # 对象管理（卡片式布局 + 指标配置面板 + 分组显示）
 │   ├── inspectors.html     # 人员管理（卡片式布局）
 │   ├── upload.html         # 截图识别（粘贴/拖拽/上传+对象匹配+快速创建）
-│   ├── ocr_admin.html      # 仪表盘类型管理（自定义类型/分类/关键词/标签映射）
+│   ├── ocr_admin.html      # OCR管理（仪表盘类型/全局变量/识别参数/测试识别）
 │   └── bulk_import.html    # 批量导入（Markdown/CSV/JSON，两步识别预览）
 │
 └── static/css/style.css    # 全局样式（深色/浅色双主题）
@@ -239,6 +245,8 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/dashboard-types/categories` | GET | 📂 获取所有仪表盘分类 |
 | `/api/dashboard-types/sync` | POST | 🔄 从巡检对象批量同步指标 |
 | `/api/dashboard-types/<id>/sync` | POST | 🔄 从巡检对象同步指标到指定类型 |
+| `/api/global-vars` | GET | 🔧 获取全局变量配置 |
+| `/api/global-vars` | POST | 🔧 保存全局变量配置 |
 | `/api/objects/import` | POST | 📥 批量导入对象 |
 | `/api/inspectors/list` | GET | 👥 人员列表 JSON |
 | `/api/inspectors/import` | POST | 📥 批量导入人员 |
@@ -258,11 +266,13 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 
 | 配置项 | 说明 |
 |---|---|
-| 类型名称 | 如"哔哩哔哩"、"小红书" |
-| 分类 | 用于巡检对象关联匹配 |
+| 类型名称 | 如"智慧城管平台"、"环卫车辆管理" |
+| 分类 | 用于巡检对象关联匹配（如监控、车辆、工牌） |
 | 识别关键词 | 包含任一即命中该类型 |
-| 标签映射 | OCR 文本 → 结构化指标 |
+| 标签映射 | OCR 文本 → 结构化指标（如 在线→online） |
+| 结果规则 | 状态判定阈值（如 offline>0→异常、online_rate<90→异常） |
 | 数字前置格式 | 支持 "209 关注" 格式 |
+| 不使用位置匹配 | 启用后仅通过类型分类匹配，忽略位置 |
 
 巡检对象创建时自动从关联的仪表盘类型同步指标配置。
 

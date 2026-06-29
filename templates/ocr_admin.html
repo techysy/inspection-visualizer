@@ -141,6 +141,23 @@
                 <div id="test-results" class="mt-3"></div>
             </div>
         </div>
+
+        <!-- 全局变量 -->
+        <div class="card mt-4">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="card-title mb-0">全局变量</h5>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">跳过关键词 <small class="text-muted">（每行一个，提取位置时忽略这些词）</small></label>
+                    <textarea class="form-control" id="global-skip-words" rows="5" placeholder="监控点总数&#10;在线"></textarea>
+                </div>
+                <div class="d-flex gap-2">
+                    <button id="btn-global-save" class="btn btn-primary flex-fill">保存全局变量</button>
+                </div>
+                <div id="global-status" class="mt-2"></div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -186,16 +203,26 @@
                 </div>
             </div>
             <div class="mb-3">
-                <label class="form-label">结果规则 <small class="text-muted">（每行一个，格式: metric_key op value=结果）</small></label>
-                <textarea class="form-control" id="modal-type-rules" rows="3" placeholder="offline>0=异常&#10;online_rate<90=异常&#10;online_rate<95=需关注"></textarea>
-            </div>
-            <div class="mb-3">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" id="modal-type-num-before">
                     <label class="form-check-label" for="modal-type-num-before">
                         数字前置格式 <small class="text-muted">（如 "123 关注"，数字在标签前面）</small>
                     </label>
                 </div>
+            </div>
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="modal-type-skip-location">
+                    <label class="form-check-label" for="modal-type-skip-location">
+                        不使用位置匹配 <small class="text-muted">（仅通过类型匹配巡检对象）</small>
+                    </label>
+                </div>
+            </div>
+            <hr>
+            <div class="mb-3">
+                <label class="form-label">结果规则 <small class="text-muted">（每行一个，格式: metric_key op value=结果）</small></label>
+                <textarea class="form-control" id="modal-type-rules" rows="3" placeholder="offline>0=异常&#10;delta<0=异常&#10;abs<5=需关注"></textarea>
+                <small class="text-muted">支持: <code>&gt;</code> <code>&lt;</code> <code>&gt;=</code> <code>&lt;=</code> 直接比较 | <code>delta&lt;0</code> 日对比 | <code>abs&lt;5</code> 绝对值</small>
             </div>
         </div>
         <div class="d-flex gap-2">
@@ -406,6 +433,7 @@
         document.getElementById('modal-type-extra-rate').checked = (t.extra_labels || []).includes('在线率');
         document.getElementById('modal-type-rules').value = Object.entries(t.result_rules || {}).map(([k, v]) => `${k}=${v}`).join('\n');
         document.getElementById('modal-type-num-before').checked = !!t.number_before_label;
+        document.getElementById('modal-type-skip-location').checked = !!t.skip_location_match;
         document.getElementById('modal-advanced-fields').style.display = '';
         document.getElementById('modal-create-hint').style.display = 'none';
         document.getElementById('modal-status').innerHTML = '';
@@ -476,6 +504,7 @@
         document.getElementById('modal-type-extra-rate').checked = false;
         document.getElementById('modal-type-rules').value = '';
         document.getElementById('modal-type-num-before').checked = false;
+        document.getElementById('modal-type-skip-location').checked = false;
         document.getElementById('modal-advanced-fields').style.display = 'none';
         document.getElementById('modal-create-hint').style.display = '';
         document.getElementById('modal-status').innerHTML = '';
@@ -503,6 +532,7 @@
             extra: document.getElementById('modal-type-extra-rate').checked,
             rules: document.getElementById('modal-type-rules').value.trim(),
             numBefore: document.getElementById('modal-type-num-before').checked,
+            skipLocation: document.getElementById('modal-type-skip-location').checked,
         };
     }
 
@@ -591,6 +621,7 @@
                 extra_labels: extraLabels,
                 result_rules: rules,
                 number_before_label: document.getElementById('modal-type-num-before').checked,
+                skip_location_match: document.getElementById('modal-type-skip-location').checked,
             };
 
             let resp;
@@ -621,6 +652,45 @@
     });
 
     loadTypes();
+
+    // ========== 全局变量 ==========
+    const globalSkipWords = document.getElementById('global-skip-words');
+    const btnGlobalSave = document.getElementById('btn-global-save');
+    const globalStatus = document.getElementById('global-status');
+
+    async function loadGlobalVars() {
+        try {
+            const resp = await fetch('/api/global-vars');
+            const data = await resp.json();
+            globalSkipWords.value = (data.skip_words || []).join('\n');
+        } catch(e) {}
+    }
+
+    btnGlobalSave.addEventListener('click', async () => {
+        btnGlobalSave.disabled = true;
+        btnGlobalSave.textContent = '保存中...';
+        const skipWords = globalSkipWords.value.split('\n').map(s => s.trim()).filter(Boolean);
+        try {
+            const resp = await fetch('/api/global-vars', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ skip_words: skipWords })
+            });
+            const data = await resp.json();
+            if (data.error) {
+                globalStatus.innerHTML = `<div class="text-danger" style="font-size:0.85rem">${data.error}</div>`;
+            } else {
+                globalStatus.innerHTML = '<div class="text-success" style="font-size:0.85rem">已保存</div>';
+                setTimeout(() => { globalStatus.innerHTML = ''; }, 2000);
+            }
+        } catch(e) {
+            globalStatus.innerHTML = `<div class="text-danger" style="font-size:0.85rem">保存失败: ${e.message}</div>`;
+        }
+        btnGlobalSave.disabled = false;
+        btnGlobalSave.textContent = '保存全局变量';
+    });
+
+    loadGlobalVars();
 
     // ========== 测试识别 ==========
     const testDropZone = document.getElementById('test-drop-zone');

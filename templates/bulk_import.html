@@ -71,7 +71,36 @@
             </div>
         </div>
 
-
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">计数文本导入</h5>
+                <p class="card-text mb-3">粘贴成员/列表文本，每行一个名字，自动去重后导入到指定对象的日列表</p>
+                
+                <div class="mb-3">
+                    <label class="form-label">选择巡检对象</label>
+                    <select id="group-object-select" class="form-select form-select-sm">
+                        <option value="">加载中...</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">成员列表 <small class="text-muted">（每行一个，支持带序号如 [1] xxx）</small></label>
+                    <textarea id="group-members-text" class="import-textarea" rows="8" placeholder="李安歌&#10;民乐&#10;5.5街-..&#10;五根松.&#10;锦城湖..&#10;SOOS&#10;..."></textarea>
+                </div>
+                
+                <div class="d-flex gap-2 align-items-center">
+                    <button id="btn-import-group" class="btn btn-success">导入</button>
+                    <span id="group-import-status" class="import-status"></span>
+                </div>
+                
+                <div id="group-preview" style="display:none" class="mt-3">
+                    <div class="alert alert-info py-2" style="font-size:0.85rem">
+                        解析到 <strong id="group-preview-count">0</strong> 个成员
+                        <button id="btn-group-confirm" class="btn btn-sm btn-success ms-2">确认导入</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -325,6 +354,104 @@
                 status.innerHTML = '<span style="color:var(--success);">' + msg + '</span>';
             }
         } catch(e) { status.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>'; }
+    });
+
+    // ========== 群成员文本导入 ==========
+    const groupObjectSelect = document.getElementById('group-object-select');
+    const groupMembersText = document.getElementById('group-members-text');
+    const btnImportGroup = document.getElementById('btn-import-group');
+    const groupImportStatus = document.getElementById('group-import-status');
+    const groupPreview = document.getElementById('group-preview');
+    const groupPreviewCount = document.getElementById('group-preview-count');
+    const btnGroupConfirm = document.getElementById('btn-group-confirm');
+
+    // 加载巡检对象列表
+    async function loadGroupObjects() {
+        try {
+            const resp = await fetch('/api/objects/list');
+            const objects = await resp.json();
+            groupObjectSelect.innerHTML = '<option value="">请选择巡检对象</option>';
+            objects.forEach(obj => {
+                const opt = document.createElement('option');
+                opt.value = obj.id;
+                opt.textContent = `${obj.name} (${obj.location || ''})`;
+                groupObjectSelect.appendChild(opt);
+            });
+        } catch(e) {
+            groupObjectSelect.innerHTML = '<option value="">加载失败</option>';
+        }
+    }
+    loadGroupObjects();
+
+    // 解析成员列表
+    function parseGroupMembers(text) {
+        const lines = text.split('\n');
+        const items = [];
+        const builtinFilters = ['搜索群成员', '搜索', '添加', '全部', '群成员', '群聊', '成员'];
+        
+        lines.forEach(line => {
+            line = line.trim();
+            if (!line) return;
+            // 去掉序号前缀 [1] xxx
+            const m = line.match(/^\[\d+\]\s*(.+)$/);
+            const name = m ? m[1].trim() : line;
+            // 过滤
+            if (name.length < 2) return;
+            if (builtinFilters.some(kw => name.includes(kw))) return;
+            items.push(name);
+        });
+        // 去重
+        return [...new Set(items)];
+    }
+
+    // 预览
+    btnImportGroup.addEventListener('click', () => {
+        const text = groupMembersText.value.trim();
+        if (!text) {
+            groupImportStatus.innerHTML = '<span style="color:var(--danger);">请输入成员列表</span>';
+            return;
+        }
+        if (!groupObjectSelect.value) {
+            groupImportStatus.innerHTML = '<span style="color:var(--danger);">请选择巡检对象</span>';
+            return;
+        }
+        const items = parseGroupMembers(text);
+        if (items.length === 0) {
+            groupImportStatus.innerHTML = '<span style="color:var(--danger);">未解析到有效成员</span>';
+            return;
+        }
+        groupPreviewCount.textContent = items.length;
+        groupPreview.style.display = 'block';
+        groupImportStatus.innerHTML = '';
+    });
+
+    // 确认导入
+    btnGroupConfirm.addEventListener('click', async () => {
+        const text = groupMembersText.value.trim();
+        const objectId = groupObjectSelect.value;
+        const items = parseGroupMembers(text);
+        
+        btnGroupConfirm.disabled = true;
+        groupImportStatus.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
+
+        try {
+            const resp = await fetch('/api/import-group-members', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ object_id: parseInt(objectId), items: items })
+            });
+            const result = await resp.json();
+            if (result.error) {
+                groupImportStatus.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
+            } else {
+                groupImportStatus.innerHTML = `<span style="color:var(--success);">成功导入 ${result.count} 个成员</span>`;
+                groupPreview.style.display = 'none';
+                groupMembersText.value = '';
+            }
+        } catch(e) {
+            groupImportStatus.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>';
+        }
+        btnGroupConfirm.disabled = false;
     });
 })();
 </script>

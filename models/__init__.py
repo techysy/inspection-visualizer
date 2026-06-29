@@ -1,3 +1,3 @@
-from .inspection import Base, engine, SessionLocal, init_db, InspectionObject, InspectionRecord, Inspector
+from .inspection import Base, engine, SessionLocal, init_db, InspectionObject, InspectionRecord, Inspector, ObjectMetric, DailyListRecord
 
-__all__ = ['Base', 'engine', 'SessionLocal', 'init_db', 'InspectionObject', 'InspectionRecord', 'Inspector']
+__all__ = ['Base', 'engine', 'SessionLocal', 'init_db', 'InspectionObject', 'InspectionRecord', 'Inspector', 'ObjectMetric', 'DailyListRecord']
