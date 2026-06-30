@@ -267,7 +267,7 @@
                 if (autoSelectedId) item.point_id = autoSelectedId;
                 var tip = noTypeMatch ? '暂无此类型对象，点击创建' : '快速创建巡检对象';
                 pointBadge = `<div class="point-select-group">
-                    <select class="point-select" onchange="currentItems[${i}].point_id=this.value||null; this.className=this.value?'point-select point-ok':'point-select point-err';">${opts}</select>
+                    <select class="point-select" onchange="currentItems[${i}].point_id=this.value||null; this.className=this.value?'point-select point-ok':'point-select point-err'; reevaluateStatus(${i}, this.value);">${opts}</select>
                     <button class="quick-create-btn" onclick="quickCreateObject(${i})" title="${tip}"${noTypeMatch ? ' style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;"' : ''}>+</button>
                 </div>`;
             }
@@ -287,22 +287,18 @@
 
             var dashLabel = item.dashboard_type_name ? `<span class="dashboard-badge">${escHtml(item.dashboard_category || item.dashboard_type_name)}</span>` : '';
             var leftBadge = matchedPoint ? `<span class="point-badge">${escHtml(matchedPoint.name)}</span>` : '';
-            var locationCatBadge = '';
             var locText = item.location || (matchedPoint && matchedPoint.location) || '';
-            if (locText || dashLabel) {
-                locationCatBadge = `<span class="location-cat-badge">${escHtml(locText)}${dashLabel ? ' ' + escHtml(item.dashboard_category || item.dashboard_type_name) : ''}</span>`;
-            }
+            var locationCatBadge = (locText || dashLabel) ? `<span class="location-cat-badge">${escHtml(locText)}${dashLabel ? ' ' + escHtml(item.dashboard_category || item.dashboard_type_name) : ''}</span>` : '';
             html += `<div class="ocr-card">
                 <div class="ocr-card-header">
                     ${leftBadge}
                     <input type="text" class="ocr-title-input" value="${escAttr(item.point_name)}" onchange="currentItems[${i}].point_name=this.value;">
-                    <div class="ocr-card-actions">${matchedPoint ? '' : pointBadge}<button class="ocr-del-btn" onclick="removeItem(${i})">&#10005;</button></div>
+                    <div class="ocr-card-actions">${locationCatBadge}${matchedPoint ? '' : pointBadge}<button class="ocr-del-btn" onclick="removeItem(${i})">&#10005;</button></div>
                 </div>
                 <div class="ocr-card-body">
                     <span class="ocr-time">${escHtml(timestamp)}</span>
                     ${resultBadge}
                     ${inspectorBadge}
-                    ${locationCatBadge}
                     ${item.status_detail ? `<span class="ocr-status-detail">${escHtml(item.status_detail)}</span>` : ''}
                 </div>
             </div>`;
@@ -403,6 +399,23 @@
                 statusEl.innerHTML = `<div class="text-danger">创建失败: ${e.message}</div>`;
             }
         });
+    };
+
+    window.reevaluateStatus = async function(idx, objectId) {
+        if (!objectId) return;
+        const item = currentItems[idx];
+        try {
+            const resp = await fetch('/api/reevaluate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ object_id: parseInt(objectId), metrics: item.metrics || {} })
+            });
+            const data = await resp.json();
+            if (data.ok && data.result !== item.result) {
+                item.result = data.result;
+                renderItems(currentItems);
+            }
+        } catch(e) {}
     };
 
     btnSave.addEventListener('click', async () => {

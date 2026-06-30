@@ -196,7 +196,14 @@
                         type: 'time',
                         time: { unit: 'day', displayFormats: { day: 'yyyy.MM.dd' }, tooltipFormat: 'yyyy.MM.dd' },
                         grid: { color: cv('--grid-line'), drawBorder: false },
-                        ticks: { color: cv('--text-dim'), font: { size: 11 }, callback: function(v) { var d = new Date(v); return d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0'); } },
+                        afterBuildTicks: function(axis) {
+                            axis.ticks = axis.ticks.filter(function(tick) {
+                                var d = new Date(tick.value);
+                                var day = d.getUTCDay();
+                                return day !== 0 && day !== 6;
+                            });
+                        },
+                        ticks: { color: cv('--text-dim'), font: { size: 11 }, callback: function(v) { var d = new Date(v); return d.getUTCFullYear() + '.' + String(d.getUTCMonth()+1).padStart(2,'0') + '.' + String(d.getUTCDate()).padStart(2,'0'); } },
                         title: { display: true, text: '日期', color: cv('--text-dim'), font: { size: 11, weight: 500 } }
                     },
                     y: {
@@ -264,6 +271,7 @@
         function updateChart() {
             chart.options.scales.x.grid.color = cv('--grid-line');
             chart.options.scales.x.ticks.color = cv('--text-dim');
+            chart.options.scales.x.title.color = cv('--text-dim');
             chart.options.scales.x.title.color = cv('--text-dim');
             chart.options.scales.y.grid.color = cv('--grid-line');
             chart.options.scales.y.ticks.color = cv('--text-dim');
@@ -427,24 +435,26 @@
     }
 
     function deleteRecord(id, btn) {
-        if (!confirm('确定删除这条巡检记录？')) return;
-        btn.disabled = true;
-        btn.textContent = '...';
-        fetch('/api/inspection_history/delete/' + id, { method: 'POST' })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.ok) {
-                    location.reload();
-                } else {
-                    alert(data.error || '删除失败');
+        showConfirm('确定删除这条巡检记录？').then(function(ok) {
+            if (!ok) return;
+            btn.disabled = true;
+            btn.textContent = '...';
+            fetch('/api/inspection_history/delete/' + id, { method: 'POST' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        location.reload();
+                    } else {
+                        alert(data.error || '删除失败');
+                        btn.disabled = false;
+                        btn.textContent = '删除';
+                    }
+                })
+                .catch(function() {
                     btn.disabled = false;
                     btn.textContent = '删除';
-                }
-            })
-            .catch(function() {
-                btn.disabled = false;
-                btn.textContent = '删除';
-            });
+                });
+        });
     }
 
     function escHtml(s) {

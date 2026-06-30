@@ -114,6 +114,77 @@ def _sync_dashboard_type_from_object(obj, metrics):
     return type_data
 
 
+def _sync_bidirectional(obj_id, dashboard_type_id, session):
+    """双向同步指标：仪表盘类型↔所有关联对象"""
+    if not dashboard_type_id:
+        return
+
+    # 加载仪表盘类型
+    types_list = _load_dashboard_types()
+    matched_dtype = next((dt for dt in types_list if dt.get('id') == dashboard_type_id), None)
+    if not matched_dtype:
+        return
+
+    # 通过名称/category匹配关联对象（模型无 dashboard_type_id 字段）
+    try:
+        all_objects = session.query(InspectionObject).filter_by(status='active').all()
+    except Exception:
+        return
+    dtype_name = matched_dtype.get('name', '')
+    dtype_category = matched_dtype.get('category', '')
+    related_objects = []
+    for obj in all_objects:
+        if obj.name == dtype_name or obj.device_type == dtype_category:
+            related_objects.append(obj)
+    # 确保当前对象在列表中
+    if obj_id not in [o.id for o in related_objects]:
+        obj = session.query(InspectionObject).get(obj_id)
+        if obj:
+            related_objects.append(obj)
+
+    if not related_objects:
+        return
+
+    dtype_labels = matched_dtype.get('labels', {})
+
+    # 方向1：仪表盘类型 → 所有关联对象
+    if dtype_labels:
+        for obj in related_objects:
+            obj_metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+            obj_keys = {m.key: m for m in obj_metrics}
+            obj_names = {m.name: m for m in obj_metrics}
+            for cn_label, short_key in dtype_labels.items():
+                if short_key not in obj_keys and cn_label not in obj_names:
+                    session.add(ObjectMetric(
+                        object_id=obj.id, key=short_key, name=cn_label,
+                        sort_order=len(obj_metrics)
+                    ))
+                    logger.info(f'  SYNC: 仪表盘→对象({obj.id}) 创建 {cn_label}({short_key})')
+
+    # 方向2：对象 → 仪表盘类型（类型无标签时，从有指标的对象同步）
+    if not dtype_labels:
+        for obj in related_objects:
+            obj_metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+            if obj_metrics:
+                for m in obj_metrics:
+                    if m.name not in dtype_labels:
+                        dtype_labels[m.name] = m.key
+                        logger.info(f'  SYNC: 对象({obj.id})→仪表盘 添加 {m.name}({m.key})')
+                break  # 只从第一个有指标的对象同步
+
+    # 方向2补充：对象有指标但类型没有的，也添加到类型
+    for obj in related_objects:
+        obj_metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+        for m in obj_metrics:
+            if m.name not in dtype_labels:
+                dtype_labels[m.name] = m.key
+                logger.info(f'  SYNC: 对象({obj.id})→仪表盘 补充 {m.name}({m.key})')
+
+    # 保存仪表盘类型更新
+    matched_dtype['labels'] = dtype_labels
+    _save_dashboard_types(types_list)
+
+
 main = Blueprint('main', __name__)
 
 # 设备类型关键词
@@ -292,7 +363,8 @@ _default_global_vars = {
         '监控点总数', '在线', '离线', '未检测', '监控点在线率', '默认区域设置', 'admin',
         '车辆总数', '在线车辆', '今日上线', '报警车辆', '全部车辆', '全部状态',
         '工牌', '全部', '未用', '请输入'
-    ]
+    ],
+    'location_aliases': {}
 }
 
 
@@ -411,15 +483,22 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
             logger.info(f'  PARSE: 纯数字 {num} -> {label}')
             continue
 
-        # 2) 匹配 "位置名（在线/总数）" 格式
-        m = re.match(r'^(.+?)\s*[（(]\s*(\d+)\s*/\s*(\d+)\s*[）)]$', line)
+        # 2) 匹配 "位置名（X/Y）" 或 "X/Y" 格式，自动映射到配置的标签
+        m = re.match(r'^(.*?)\s*[（(]?\s*(\d+)\s*/\s*(\d+)\s*[）)]?\s*$', line)
         if m:
             region_name = m.group(1).strip()
-            online_val = int(m.group(2))
-            total_val = int(m.group(3))
-            metrics['online'] = online_val
-            metrics['total'] = total_val
-            logger.info(f'  PARSE: 位置格式 {region_name} 在线={online_val} 总数={total_val}')
+            val1 = int(m.group(2))
+            val2 = int(m.group(3))
+            # 根据配置的标签映射（前两个标签分别对应 X 和 Y）
+            label_keys = list(label_map.keys())
+            if len(label_keys) >= 2:
+                metrics[label_map[label_keys[0]]] = val1
+                metrics[label_map[label_keys[1]]] = val2
+                logger.info(f'  PARSE: X/Y格式 {region_name or "无位置"} {label_keys[0]}={val1} {label_keys[1]}={val2}')
+            else:
+                metrics['online'] = val1
+                metrics['total'] = val2
+                logger.info(f'  PARSE: X/Y格式 {region_name or "无位置"} 在线={val1} 总数={val2}')
             pending_labels = []
             continue
 
@@ -489,6 +568,14 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
         region_name = _extract_location_from_lines([filename])
         if region_name:
             logger.info(f'  PARSE: 从文件名提取位置: {region_name}')
+
+    # 应用位置别名
+    if region_name:
+        gvars = _load_global_vars()
+        aliases = gvars.get('location_aliases', {})
+        if region_name in aliases:
+            logger.info(f'  PARSE: 位置别名 {region_name} -> {aliases[region_name]}')
+            region_name = aliases[region_name]
 
 
     # 从OCR文本中提取截图日期
@@ -738,19 +825,19 @@ def object_detail(object_id):
         abnormal_count = sum(1 for r in records if r.result == '异常')
         warn_count = sum(1 for r in records if r.result == '需关注')
 
-        # 按结果分组，用于图表（同时间的记录加偏移避免重叠）
+        # 按结果分组，用于图表（跳过周末）
         result_timeline = {}
-        ts_counter = {}
         for record in records:
+            # 跳过周末（周六=5，周日=6）
+            if record.timestamp.weekday() >= 5:
+                continue
             result_key = record.result
             if result_key not in result_timeline:
                 result_timeline[result_key] = []
             ts_ms = int(record.timestamp.timestamp() * 1000)
-            offset = ts_counter.get(ts_ms, 0)
-            ts_counter[ts_ms] = offset + 1
             status_y = {'正常': 1, '异常': 0, '需关注': 0.5}
             result_timeline[result_key].append({
-                'x': ts_ms + offset * 60000,
+                'x': ts_ms,
                 'y': status_y.get(record.result, 0.5),
                 'result': record.result,
                 'inspector': record.inspector.name if record.inspector else (default_inspector.name if default_inspector else '未知'),
@@ -867,6 +954,13 @@ def object_add():
         obj = InspectionObject(name=name, location=location, device_type=device_type, description=description)
         session.add(obj)
         session.commit()
+        # 双向同步
+        if device_type:
+            types_list = _load_dashboard_types()
+            matched_type = next((t for t in types_list if t.get('category') == device_type or t.get('name') == device_type), None)
+            if matched_type:
+                _sync_bidirectional(obj.id, matched_type['id'], session)
+                session.commit()
         flash(f'巡检对象 "{name}" 添加成功', 'success')
     except Exception as e:
         session.rollback()
@@ -900,6 +994,13 @@ def object_edit(object_id):
         obj.description = description
 
         session.commit()
+        # 双向同步
+        if device_type:
+            types_list = _load_dashboard_types()
+            matched_type = next((t for t in types_list if t.get('category') == device_type or t.get('name') == device_type), None)
+            if matched_type:
+                _sync_bidirectional(obj.id, matched_type['id'], session)
+                session.commit()
         flash(f'巡检对象 "{obj.name}" 已更新', 'success')
     except Exception as e:
         session.rollback()
@@ -1114,14 +1215,28 @@ def api_object_metrics_update(object_id, metric_id):
 
 @main.route('/api/objects/<int:object_id>/metrics/<int:metric_id>', methods=['DELETE'])
 def api_object_metrics_delete(object_id, metric_id):
-    """删除指标配置"""
+    """删除指标配置并同步到仪表盘类型"""
     session = SessionLocal()
     try:
         metric = session.query(ObjectMetric).filter_by(id=metric_id, object_id=object_id).first()
         if not metric:
             return jsonify({'error': '指标不存在'}), 404
+
+        metric_name = metric.name
+        metric_key = metric.key
         session.delete(metric)
         session.commit()
+
+        # 同步到仪表盘类型：删除对应的标签
+        obj = session.query(InspectionObject).get(object_id)
+        if obj:
+            types_list = _load_dashboard_types()
+            matched_type = next((t for t in types_list if t['name'] == obj.name or t.get('category') == obj.device_type), None)
+            if matched_type and metric_name in matched_type.get('labels', {}):
+                del matched_type['labels'][metric_name]
+                _save_dashboard_types(types_list)
+                logger.info(f'  SYNC: 从仪表盘类型删除标签 {metric_name}({metric_key})')
+
         return jsonify({'ok': True})
     finally:
         session.close()
@@ -1153,6 +1268,20 @@ def api_re_evaluate_records(object_id):
     except Exception as e:
         session.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@main.route('/api/reevaluate', methods=['POST'])
+def api_reevaluate():
+    """根据对象阈值重新评估状态"""
+    data = request.get_json()
+    if not data or not data.get('object_id') or not data.get('metrics'):
+        return jsonify({'error': '缺少参数'}), 400
+    session = SessionLocal()
+    try:
+        result = _check_metrics_thresholds(data['metrics'], data['object_id'], session)
+        return jsonify({'ok': True, 'result': result or '正常'})
     finally:
         session.close()
 
@@ -1727,6 +1856,21 @@ def api_dashboard_types_add():
     }
     types_list.append(new_type)
     _save_dashboard_types(types_list)
+    # 双向同步
+    try:
+        session = SessionLocal()
+        obj = session.query(InspectionObject).filter_by(name=new_type['name'], status='active').first()
+        if not obj and new_id.startswith('obj_'):
+            try:
+                obj = session.query(InspectionObject).get(int(new_id[4:]))
+            except (ValueError, IndexError):
+                pass
+        if obj:
+            _sync_bidirectional(obj.id, new_id, session)
+            session.commit()
+        session.close()
+    except Exception as e:
+        logger.error(f'  SYNC: 新增类型同步失败: {e}')
     return jsonify({'ok': True, 'type': new_type})
 
 
@@ -1752,6 +1896,21 @@ def api_dashboard_types_update(type_id):
                 'skip_location_match': data.get('skip_location_match', t.get('skip_location_match', False)),
             })
             _save_dashboard_types(types_list)
+            # 双向同步
+            try:
+                session = SessionLocal()
+                obj = session.query(InspectionObject).filter_by(name=types_list[i]['name'], status='active').first()
+                if not obj and type_id.startswith('obj_'):
+                    try:
+                        obj = session.query(InspectionObject).get(int(type_id[4:]))
+                    except (ValueError, IndexError):
+                        pass
+                if obj:
+                    _sync_bidirectional(obj.id, type_id, session)
+                    session.commit()
+                session.close()
+            except Exception as e:
+                logger.error(f'  SYNC: 更新类型同步失败: {e}')
             return jsonify({'ok': True, 'type': types_list[i]})
 
     return jsonify({'error': f'类型 "{type_id}" 不存在'}), 404
@@ -1918,6 +2077,19 @@ def api_quick_create_object():
         obj = InspectionObject(name=name, location=location, device_type=device_type, description=description)
         session.add(obj)
         session.commit()
+
+        # 创建对应的仪表盘类型
+        type_id = f'obj_{obj.id}'
+        _sync_dashboard_type_from_object(obj, [])
+
+        # 双向同步指标
+        if device_type:
+            types_list = _load_dashboard_types()
+            matched_type = next((t for t in types_list if t.get('category') == device_type or t.get('name') == device_type), None)
+            if matched_type:
+                _sync_bidirectional(obj.id, matched_type['id'], session)
+                session.commit()
+
         return jsonify({'ok': True, 'id': obj.id, 'name': obj.name})
     except Exception as e:
         session.rollback()
@@ -2130,12 +2302,13 @@ def api_save():
                 dashboard_types = _load_dashboard_types()
                 matched_dtype = next((dt for dt in dashboard_types if dt.get('id') == dashboard_type_id), None)
                 if matched_dtype:
-                    for short_key, cn_label in matched_dtype.get('labels', {}).items():
+                    for cn_label, short_key in matched_dtype.get('labels', {}).items():
                         label_to_key[cn_label] = short_key
 
             # 自动创建指标配置（如果不存在）
             if parsed_metrics:
                 existing_metrics = {m.key: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
+                existing_names = {m.name: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
                 for key, val in parsed_metrics.items():
                     try:
                         fv = float(val)
@@ -2144,6 +2317,12 @@ def api_save():
                     # 用中文标签对应的短key去匹配已有指标
                     mapped_key = label_to_key.get(key, key)
                     match_key = mapped_key if mapped_key in existing_metrics else key
+                    # 用中文名查找已有指标（避免重复）
+                    cn_name = None
+                    for cn, sk in label_to_key.items():
+                        if sk == key or sk == mapped_key:
+                            cn_name = cn
+                            break
                     if match_key in existing_metrics:
                         m = existing_metrics[match_key]
                         new_max = max(fv * 1.5, 100)
@@ -2154,6 +2333,8 @@ def api_save():
                         if fv >= 10000 and not m.unit:
                             m.unit = 'w'
                             m.max_value = max(fv * 1.5, 10000)
+                    elif cn_name and cn_name in existing_names:
+                        pass  # 已有同名指标，跳过
                     else:
                         unit = ''
                         max_val = max(fv * 1.5, 100)
@@ -2161,10 +2342,10 @@ def api_save():
                             unit = 'w'
                             max_val = max(fv * 1.5, 10000)
                         session.add(ObjectMetric(
-                            object_id=obj.id, key=mapped_key, name=mapped_key, unit=unit,
+                            object_id=obj.id, key=mapped_key, name=cn_name or mapped_key, unit=unit,
                             max_value=max_val, show_in_chart=True
                         ))
-                        logger.info(f'  SAVE: 自动创建指标配置 key={mapped_key} max_value={max_val}')
+                        logger.info(f'  SAVE: 自动创建指标配置 key={mapped_key} name={cn_name or mapped_key} max_value={max_val}')
 
             threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, session)
             if threshold_result:

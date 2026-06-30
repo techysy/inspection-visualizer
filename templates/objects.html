@@ -67,11 +67,9 @@
                     {% if obj.status == 'inactive' %}<span class="film-tag" style="background:rgba(239,68,68,0.1);color:#ef4444;">停用</span>{% endif %}
                 </div>
             </div>
-            <form method="POST" action="{{ url_for('main.object_delete', object_id=obj.id) }}" class="d-inline" onsubmit="return confirm('确定删除巡检对象 {{ obj.name }}？关联的巡检记录也会删除。')">
-                <button type="submit" title="删除对象" class="clone-btn clone-btn-del">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                </button>
-            </form>
+            <button type="button" title="删除对象" class="clone-btn clone-btn-del" onclick="confirmDeleteObject('{{ url_for('main.object_delete', object_id=obj.id) }}', '{{ obj.name }}')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
             <form method="POST" action="{{ url_for('main.object_clone', object_id=obj.id) }}" class="d-inline">
                 <button type="submit" title="复制对象" class="clone-btn">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -336,9 +334,37 @@ function saveThresholdConfig(objectId) {
         });
 }
 
+function showConfirm(message) {
+    return new Promise(function(resolve) {
+        var mask = document.createElement('div');
+        mask.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        mask.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:1.5rem;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">' +
+            '<p style="margin:0 0 1.2rem;color:var(--text-primary);font-size:0.95rem;line-height:1.5;">' + message + '</p>' +
+            '<div style="display:flex;gap:0.75rem;justify-content:flex-end;">' +
+            '<button id="cfm-cancel" style="padding:0.5rem 1.25rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:0.88rem;">取消</button>' +
+            '<button id="cfm-ok" style="padding:0.5rem 1.25rem;border-radius:10px;border:none;background:var(--primary);color:#fff;cursor:pointer;font-size:0.88rem;">确定</button>' +
+            '</div></div>';
+        document.body.appendChild(mask);
+        mask.querySelector('#cfm-cancel').onclick = function() { mask.remove(); resolve(false); };
+        mask.querySelector('#cfm-ok').onclick = function() { mask.remove(); resolve(true); };
+        mask.onclick = function(e) { if (e.target === mask) { mask.remove(); resolve(false); } };
+    });
+}
+
 function deleteMetric(objectId, metricId) {
-    fetch('/api/objects/' + objectId + '/metrics/' + metricId, {method: 'DELETE'})
-        .then(function(r) { return r.json(); }).then(function() { loadMetrics(objectId); });
+    showConfirm('确定删除该指标？删除后将同步到仪表盘类型。').then(function(ok) {
+        if (!ok) return;
+        fetch('/api/objects/' + objectId + '/metrics/' + metricId, {method: 'DELETE'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    alert(data.error);
+                } else {
+                    loadMetrics(objectId);
+                }
+            })
+            .catch(function(e) { alert('删除失败: ' + e.message); });
+    });
 }
 
 function editMetric(objectId, metricId) {
@@ -473,4 +499,16 @@ document.addEventListener('DOMContentLoaded', function() {
     border-bottom: 1px solid var(--border);
 }
 </style>
+<script>
+function confirmDeleteObject(url, name) {
+    showConfirm('确定删除巡检对象 ' + name + '？关联的巡检记录也会删除。').then(function(ok) {
+        if (!ok) return;
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = url;
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+</script>
 {% endblock %}

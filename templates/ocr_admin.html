@@ -152,6 +152,10 @@
                     <label class="form-label">跳过关键词 <small class="text-muted">（每行一个，提取位置时忽略这些词）</small></label>
                     <textarea class="form-control" id="global-skip-words" rows="5" placeholder="监控点总数&#10;在线"></textarea>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label">位置别名 <small class="text-muted">（每行一个，格式：长名称=短名称，如 中江县综合行政执法局=城区）</small></label>
+                    <textarea class="form-control" id="global-location-aliases" rows="4" placeholder="中江县综合行政执法局=城区&#10;中江县城区=城区"></textarea>
+                </div>
                 <div class="d-flex gap-2">
                     <button id="btn-global-save" class="btn btn-primary flex-fill">保存全局变量</button>
                 </div>
@@ -441,7 +445,8 @@
     };
 
     window.deleteType = async function(id) {
-        if (!confirm('确定删除此仪表盘类型？')) return;
+        const ok = await showConfirm('确定删除此仪表盘类型？');
+        if (!ok) return;
         try {
             const resp = await fetch(`/api/dashboard-types/${id}`, { method: 'DELETE' });
             const data = await resp.json();
@@ -552,9 +557,9 @@
             closeModal();
             return;
         }
-        if (confirm('有未保存的修改，确定放弃？')) {
-            closeModal();
-        }
+        showConfirm('有未保存的修改，确定放弃？').then(function(ok) {
+            if (ok) closeModal();
+        });
     }
 
     document.getElementById('modal-cancel').addEventListener('click', tryCloseModal);
@@ -655,6 +660,7 @@
 
     // ========== 全局变量 ==========
     const globalSkipWords = document.getElementById('global-skip-words');
+    const globalLocationAliases = document.getElementById('global-location-aliases');
     const btnGlobalSave = document.getElementById('btn-global-save');
     const globalStatus = document.getElementById('global-status');
 
@@ -663,6 +669,8 @@
             const resp = await fetch('/api/global-vars');
             const data = await resp.json();
             globalSkipWords.value = (data.skip_words || []).join('\n');
+            const aliases = data.location_aliases || {};
+            globalLocationAliases.value = Object.entries(aliases).map(([k, v]) => `${k}=${v}`).join('\n');
         } catch(e) {}
     }
 
@@ -670,11 +678,18 @@
         btnGlobalSave.disabled = true;
         btnGlobalSave.textContent = '保存中...';
         const skipWords = globalSkipWords.value.split('\n').map(s => s.trim()).filter(Boolean);
+        const aliases = {};
+        globalLocationAliases.value.split('\n').forEach(line => {
+            const parts = line.trim().split('=');
+            if (parts.length === 2 && parts[0] && parts[1]) {
+                aliases[parts[0].trim()] = parts[1].trim();
+            }
+        });
         try {
             const resp = await fetch('/api/global-vars', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ skip_words: skipWords })
+                body: JSON.stringify({ skip_words: skipWords, location_aliases: aliases })
             });
             const data = await resp.json();
             if (data.error) {

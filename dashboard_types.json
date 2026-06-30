@@ -6,23 +6,18 @@
       "category": "监控",
       "description": "监控系统仪表盘",
       "detect_keywords": [
-        "监控点",
         "智慧城管平台",
-        "在线率"
+        "在线率",
+        "监控点"
       ],
       "labels": {
-        "在线": "online",
-        "离线": "offline",
-        "未检测": "undetected"
+        "在线": "在线",
+        "在线率": "在线率"
       },
       "extra_labels": [
         "在线率"
       ],
-      "result_rules": {
-        "offline>0": "异常",
-        "online_rate<90": "异常",
-        "online_rate<95": "需关注"
-      },
+      "result_rules": {},
       "number_before_label": false,
       "skip_location_match": false
     },
@@ -32,13 +27,13 @@
       "category": "车辆",
       "description": "车辆管理仪表盘",
       "detect_keywords": [
-        "行驶车辆",
-        "环卫车辆管理",
-        "在线车辆"
+        "在线车辆",
+        "车辆总数",
+        "环卫车辆管理"
       ],
       "labels": {
         "在线车辆": "在线车辆",
-        "行驶车辆": "行驶车辆"
+        "车辆总数": "车辆总数"
       },
       "extra_labels": [],
       "result_rules": {
@@ -63,45 +58,7 @@
       "extra_labels": [],
       "result_rules": {},
       "number_before_label": false,
-      "skip_location_match": false
-    },
-    {
-      "id": "type_1782497693288",
-      "name": "哔哩哔哩",
-      "category": "自媒体账号",
-      "description": "数据分析",
-      "detect_keywords": [
-        "获赞",
-        "哔哩哔哩"
-      ],
-      "labels": {
-        "关注": "关注",
-        "粉丝": "粉丝",
-        "获赞": "获赞"
-      },
-      "extra_labels": [],
-      "result_rules": {},
-      "number_before_label": true,
-      "name_from_first_line": true
-    },
-    {
-      "id": "type_1782622410786",
-      "name": "小红书",
-      "category": "自媒体账号",
-      "description": "数据分析",
-      "detect_keywords": [
-        "小红书",
-        "笔记",
-        "小红书号"
-      ],
-      "labels": {
-        "笔记": "笔记",
-        "粉丝": "粉丝"
-      },
-      "extra_labels": [],
-      "result_rules": {},
-      "number_before_label": false,
-      "name_from_first_line": true
+      "skip_location_match": true
     }
   ]
 }
