@@ -154,6 +154,11 @@
             {% endfor %}
         {% endfor %}
         allData.sort(function(a, b) { return a.x - b.x; });
+        allData = allData.filter(function(d) {
+            var dt = new Date(d.x);
+            var day = dt.getDay();
+            return day !== 0 && day !== 6;
+        });
         allData.forEach(function(d) { d.y = statusY[d.result] !== undefined ? statusY[d.result] : 0.5; });
 
         var pointColors = allData.map(function(d) { return colors[d.result] || '#818cf8'; });
@@ -357,7 +362,12 @@
             var canvas = document.getElementById('metricChart' + mc.id);
             if (!canvas) return;
 
-            var dataRev = historyData.slice().reverse();
+            var dataRev = historyData.slice().reverse().filter(function(item) {
+                if (!item.timestamp) return true;
+                var d = new Date(item.timestamp);
+                var day = d.getDay();
+                return day !== 0 && day !== 6;
+            });
             var labels = dataRev.map(function(item) {
                 if (!item.timestamp) return '';
                 var d = new Date(item.timestamp);
@@ -407,8 +417,9 @@
                             ticks: { color: cv('--text-dim'), font: { size: 10 }, maxRotation: 45 }
                         },
                         y: {
-                            beginAtZero: true,
-                            max: (function(){ var m = mc.max_value ? parseFloat(mc.max_value) : null; if (m === null) return null; var v = mc.unit === 'w' ? m / 10000 * 1.2 : m * 1.2; var mag = Math.pow(10, Math.floor(Math.log10(v))); var norm = v / mag; return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag; })(),
+                            beginAtZero: false,
+                            suggestedMin: 0,
+                            suggestedMax: (function(){ var m = mc.max_value ? parseFloat(mc.max_value) : null; if (m === null) return undefined; return m * 1.1; })(),
                             grid: { color: cv('--grid-line'), drawBorder: false },
                             ticks: { color: cv('--text-dim'), font: { size: 10 }, callback: function(v) { var mv = mc.max_value ? parseFloat(mc.max_value) : null; if (mc.unit === 'w') { mv = mv ? mv / 10000 : null; return v + 'w'; } if (mv !== null && v > mv) return ''; return v; } }
                         }

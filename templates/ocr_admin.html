@@ -153,8 +153,8 @@
                     <textarea class="form-control" id="global-skip-words" rows="5" placeholder="监控点总数&#10;在线"></textarea>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">位置别名 <small class="text-muted">（每行一个，格式：长名称=短名称，如 中江县综合行政执法局=城区）</small></label>
-                    <textarea class="form-control" id="global-location-aliases" rows="4" placeholder="中江县综合行政执法局=城区&#10;中江县城区=城区"></textarea>
+                    <label class="form-label">位置别名 <small class="text-muted">（每行一个，格式：长名称=短名称，如 XX街道办事处=城区）</small></label>
+                    <textarea class="form-control" id="global-location-aliases" rows="4" placeholder="XX街道办事处=城区&#10;XX城区=城区"></textarea>
                 </div>
                 <div class="d-flex gap-2">
                     <button id="btn-global-save" class="btn btn-primary flex-fill">保存全局变量</button>
@@ -197,6 +197,120 @@
             <div class="mb-3">
                 <label class="form-label">标签映射 <small class="text-muted">（每行一个，格式: 显示名称=内部key）</small></label>
                 <textarea class="form-control" id="modal-type-labels" rows="4" placeholder="监控点总数=total&#10;在线=online&#10;离线=offline&#10;未检测=undetected"></textarea>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">计算类型 <small class="text-muted">（选择计算方式，参数会对应变化）</small></label>
+                <select class="form-control" id="modal-calc-type">
+                    <option value="custom">自定义公式</option>
+                    <option value="percentage">计算百分比</option>
+                    <option value="sum">求和</option>
+                    <option value="difference">差值</option>
+                </select>
+            </div>
+            
+            <!-- 自定义公式 -->
+            <div id="calc-custom" class="calc-section">
+                <div class="mb-3">
+                    <label class="form-label">计算公式 <small class="text-muted">（每行一个，格式: 目标key=公式，如 online=行驶+停车）</small></label>
+                    <textarea class="form-control" id="modal-type-formulas" rows="3" placeholder="online=行驶+停车&#10;total=行驶+停车+离线"></textarea>
+                </div>
+            </div>
+            
+            <!-- 计算百分比 -->
+            <div id="calc-percentage" class="calc-section" style="display:none">
+                <div class="calc-percentage-panel">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label" style="font-size:0.8rem">结果名称</label>
+                                <input type="text" class="form-control form-control-sm" id="calc-pct-name" placeholder="如: 在线率">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label" style="font-size:0.8rem">小数位数</label>
+                                <select class="form-control form-control-sm" id="calc-pct-decimal">
+                                    <option value="0">0位</option>
+                                    <option value="1">1位</option>
+                                    <option value="2" selected>2位</option>
+                                    <option value="3">3位</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label" style="font-size:0.8rem">分子字段</label>
+                                <select class="form-control form-control-sm" id="calc-pct-numerator">
+                                    <option value="">选择字段</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label" style="font-size:0.8rem">分母字段</label>
+                                <div class="input-group input-group-sm">
+                                    <select class="form-control" id="calc-pct-denominator">
+                                        <option value="">选择字段</option>
+                                    </select>
+                                    <button class="btn btn-outline-secondary" type="button" id="calc-pct-denom-toggle" style="font-size:0.75rem">固定值</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="calc-pct-fixed-group" style="display:none">
+                        <div class="mb-2">
+                            <label class="form-label" style="font-size:0.8rem">分母固定值</label>
+                            <input type="number" class="form-control form-control-sm" id="calc-pct-fixed-value" placeholder="如: 100">
+                        </div>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label" style="font-size:0.8rem">输出格式</label>
+                        <select class="form-control form-control-sm" id="calc-pct-format">
+                            <option value="decimal">小数 (0.85)</option>
+                            <option value="percent">百分比 (85%)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 求和 -->
+            <div id="calc-sum" class="calc-section" style="display:none">
+                <div class="mb-3">
+                    <label class="form-label">结果名称</label>
+                    <input type="text" class="form-control form-control-sm" id="calc-sum-name" placeholder="如: 总数">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">求和字段 <small class="text-muted">（勾选需要相加的字段）</small></label>
+                    <div id="calc-sum-fields" class="calc-fields-checkboxes"></div>
+                </div>
+            </div>
+            
+            <!-- 差值 -->
+            <div id="calc-difference" class="calc-section" style="display:none">
+                <div class="mb-3">
+                    <label class="form-label">结果名称</label>
+                    <input type="text" class="form-control form-control-sm" id="calc-diff-name" placeholder="如: 变化量">
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">被减数字段</label>
+                            <select class="form-control form-control-sm" id="calc-diff-minuend">
+                                <option value="">选择字段</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">减数字段</label>
+                            <select class="form-control form-control-sm" id="calc-diff-subtrahend">
+                                <option value="">选择字段</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="mb-3">
                 <div class="form-check">
@@ -434,10 +548,53 @@
         document.getElementById('modal-type-category').value = t.category || '';
         document.getElementById('modal-type-keywords').value = (t.detect_keywords || []).join('\n');
         document.getElementById('modal-type-labels').value = Object.entries(t.labels || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+        document.getElementById('modal-type-formulas').value = Object.entries(t.formulas || {}).map(([k, v]) => `${k}=${v}`).join('\n');
         document.getElementById('modal-type-extra-rate').checked = (t.extra_labels || []).includes('在线率');
         document.getElementById('modal-type-rules').value = Object.entries(t.result_rules || {}).map(([k, v]) => `${k}=${v}`).join('\n');
         document.getElementById('modal-type-num-before').checked = !!t.number_before_label;
         document.getElementById('modal-type-skip-location').checked = !!t.skip_location_match;
+        
+        // 恢复计算类型配置
+        const calcConfig = t.calc_config || null;
+        if (calcConfig && calcConfig.type) {
+            calcTypeSelect.value = calcConfig.type;
+            updateCalcTypeFields();
+            
+            if (calcConfig.type === 'percentage') {
+                document.getElementById('calc-pct-name').value = calcConfig.result_name || '';
+                document.getElementById('calc-pct-decimal').value = calcConfig.decimal_places || 2;
+                document.getElementById('calc-pct-format').value = calcConfig.format || 'decimal';
+                if (calcConfig.denominator_type === 'fixed') {
+                    denomToggle.textContent = '字段';
+                    denomSelect.style.display = 'none';
+                    fixedGroup.style.display = '';
+                    fixedInput.value = calcConfig.denominator || '';
+                } else {
+                    denomToggle.textContent = '固定值';
+                    denomSelect.style.display = '';
+                    fixedGroup.style.display = 'none';
+                    denomSelect.value = calcConfig.denominator || '';
+                }
+                document.getElementById('calc-pct-numerator').value = calcConfig.numerator || '';
+            } else if (calcConfig.type === 'sum') {
+                document.getElementById('calc-sum-name').value = calcConfig.result_name || '';
+                // 等待字段选项更新后勾选
+                setTimeout(() => {
+                    (calcConfig.fields || []).forEach(f => {
+                        const cb = document.getElementById(`sum-field-${f}`);
+                        if (cb) cb.checked = true;
+                    });
+                }, 100);
+            } else if (calcConfig.type === 'difference') {
+                document.getElementById('calc-diff-name').value = calcConfig.result_name || '';
+                document.getElementById('calc-diff-minuend').value = calcConfig.minuend || '';
+                document.getElementById('calc-diff-subtrahend').value = calcConfig.subtrahend || '';
+            }
+        } else {
+            calcTypeSelect.value = 'custom';
+            updateCalcTypeFields();
+        }
+        
         document.getElementById('modal-advanced-fields').style.display = '';
         document.getElementById('modal-create-hint').style.display = 'none';
         document.getElementById('modal-status').innerHTML = '';
@@ -510,6 +667,21 @@
         document.getElementById('modal-type-rules').value = '';
         document.getElementById('modal-type-num-before').checked = false;
         document.getElementById('modal-type-skip-location').checked = false;
+        
+        // 重置计算类型
+        calcTypeSelect.value = 'custom';
+        updateCalcTypeFields();
+        document.getElementById('calc-pct-name').value = '';
+        document.getElementById('calc-pct-numerator').value = '';
+        document.getElementById('calc-pct-denominator').value = '';
+        document.getElementById('calc-pct-fixed-value').value = '';
+        document.getElementById('calc-pct-decimal').value = '2';
+        document.getElementById('calc-pct-format').value = 'decimal';
+        document.getElementById('calc-sum-name').value = '';
+        document.getElementById('calc-diff-name').value = '';
+        document.getElementById('calc-diff-minuend').value = '';
+        document.getElementById('calc-diff-subtrahend').value = '';
+        
         document.getElementById('modal-advanced-fields').style.display = 'none';
         document.getElementById('modal-create-hint').style.display = '';
         document.getElementById('modal-status').innerHTML = '';
@@ -586,6 +758,176 @@
         el.addEventListener('change', checkModalDirty);
     });
 
+    // ========== 计算类型切换 ==========
+    const calcTypeSelect = document.getElementById('modal-calc-type');
+    const calcSections = document.querySelectorAll('.calc-section');
+    
+    function updateCalcTypeFields() {
+        const selectedType = calcTypeSelect.value;
+        calcSections.forEach(section => { section.style.display = 'none'; });
+        
+        let targetSection;
+        switch(selectedType) {
+            case 'percentage':
+                targetSection = document.getElementById('calc-percentage');
+                break;
+            case 'sum':
+                targetSection = document.getElementById('calc-sum');
+                break;
+            case 'difference':
+                targetSection = document.getElementById('calc-difference');
+                break;
+            default:
+                targetSection = document.getElementById('calc-custom');
+        }
+        if (targetSection) {
+            targetSection.style.display = '';
+            if (selectedType !== 'custom') {
+                updateCalcFieldOptions();
+            }
+        }
+    }
+    
+    function getAvailableLabels() {
+        const labelsText = document.getElementById('modal-type-labels').value;
+        const labels = {};
+        labelsText.split('\n').forEach(line => {
+            line = line.trim();
+            if (line.includes('=')) {
+                const [k, v] = line.split('=', 2);
+                labels[k.trim()] = v.trim();
+            }
+        });
+        return labels;
+    }
+    
+    function updateCalcFieldOptions() {
+        const labels = getAvailableLabels();
+        const options = Object.entries(labels).map(([k, v]) => 
+            `<option value="${escAttr(v)}">${escHtml(k)}</option>`
+        ).join('');
+        const defaultOption = '<option value="">选择字段</option>';
+        
+        // 更新百分比字段
+        const numSelect = document.getElementById('calc-pct-numerator');
+        const denomSelect = document.getElementById('calc-pct-denominator');
+        if (numSelect) {
+            const currentVal = numSelect.value;
+            numSelect.innerHTML = defaultOption + options;
+            if ([...numSelect.options].some(o => o.value === currentVal)) {
+                numSelect.value = currentVal;
+            }
+        }
+        if (denomSelect) {
+            const currentVal = denomSelect.value;
+            denomSelect.innerHTML = defaultOption + options;
+            if ([...denomSelect.options].some(o => o.value === currentVal)) {
+                denomSelect.value = currentVal;
+            }
+        }
+        
+        // 更新差值字段
+        const minuendSelect = document.getElementById('calc-diff-minuend');
+        const subtrahendSelect = document.getElementById('calc-diff-subtrahend');
+        if (minuendSelect) {
+            const currentVal = minuendSelect.value;
+            minuendSelect.innerHTML = defaultOption + options;
+            if ([...minuendSelect.options].some(o => o.value === currentVal)) {
+                minuendSelect.value = currentVal;
+            }
+        }
+        if (subtrahendSelect) {
+            const currentVal = subtrahendSelect.value;
+            subtrahendSelect.innerHTML = defaultOption + options;
+            if ([...subtrahendSelect.options].some(o => o.value === currentVal)) {
+                subtrahendSelect.value = currentVal;
+            }
+        }
+        
+        // 更新求和字段
+        const sumFieldsDiv = document.getElementById('calc-sum-fields');
+        if (sumFieldsDiv) {
+            const currentChecked = [...sumFieldsDiv.querySelectorAll('input:checked')].map(i => i.value);
+            sumFieldsDiv.innerHTML = Object.entries(labels).map(([k, v]) => `
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="sum-field-${escAttr(v)}" value="${escAttr(v)}" ${currentChecked.includes(v) ? 'checked' : ''}>
+                    <label class="form-check-label" for="sum-field-${escAttr(v)}">${escHtml(k)}</label>
+                </div>
+            `).join('');
+        }
+    }
+    
+    calcTypeSelect.addEventListener('change', updateCalcTypeFields);
+    document.getElementById('modal-type-labels').addEventListener('blur', () => {
+        if (calcTypeSelect.value !== 'custom') {
+            updateCalcFieldOptions();
+        }
+    });
+    
+    // 百分比分母切换
+    const denomToggle = document.getElementById('calc-pct-denom-toggle');
+    const denomSelect = document.getElementById('calc-pct-denominator');
+    const fixedGroup = document.getElementById('calc-pct-fixed-group');
+    const fixedInput = document.getElementById('calc-pct-fixed-value');
+    
+    denomToggle.addEventListener('click', () => {
+        if (denomToggle.textContent === '固定值') {
+            denomToggle.textContent = '字段';
+            denomSelect.style.display = 'none';
+            fixedGroup.style.display = '';
+        } else {
+            denomToggle.textContent = '固定值';
+            denomSelect.style.display = '';
+            fixedGroup.style.display = 'none';
+        }
+    });
+    
+    function getCalcConfig() {
+        const type = calcTypeSelect.value;
+        if (type === 'custom') {
+            return null;
+        }
+        
+        if (type === 'percentage') {
+            const numerator = document.getElementById('calc-pct-numerator').value;
+            const useFixedDenom = denomToggle.textContent === '字段';
+            const denominator = useFixedDenom ? denomSelect.value : '';
+            const fixedValue = useFixedDenom ? '' : fixedInput.value;
+            const resultName = document.getElementById('calc-pct-name').value;
+            const decimal = document.getElementById('calc-pct-decimal').value;
+            const format = document.getElementById('calc-pct-format').value;
+            
+            if (!resultName || !numerator || (!denominator && !fixedValue)) return null;
+            
+            return {
+                type: 'percentage',
+                result_name: resultName,
+                numerator: numerator,
+                denominator_type: useFixedDenom ? 'field' : 'fixed',
+                denominator: useFixedDenom ? denominator : fixedValue,
+                decimal_places: parseInt(decimal),
+                format: format
+            };
+        }
+        
+        if (type === 'sum') {
+            const resultName = document.getElementById('calc-sum-name').value;
+            const fields = [...document.querySelectorAll('#calc-sum-fields input:checked')].map(i => i.value);
+            if (!resultName || fields.length < 2) return null;
+            return { type: 'sum', result_name: resultName, fields: fields };
+        }
+        
+        if (type === 'difference') {
+            const resultName = document.getElementById('calc-diff-name').value;
+            const minuend = document.getElementById('calc-diff-minuend').value;
+            const subtrahend = document.getElementById('calc-diff-subtrahend').value;
+            if (!resultName || !minuend || !subtrahend) return null;
+            return { type: 'difference', result_name: resultName, minuend: minuend, subtrahend: subtrahend };
+        }
+        
+        return null;
+    }
+
     document.getElementById('modal-confirm').addEventListener('click', async () => {
         try {
             const existingId = document.getElementById('modal-type-id').value;
@@ -614,8 +956,46 @@
                 }
             });
 
+            const formulas = {};
+            document.getElementById('modal-type-formulas').value.split('\n').forEach(line => {
+                line = line.trim();
+                if (line.includes('=')) {
+                    const [k, v] = line.split('=', 2);
+                    formulas[k.trim()] = v.trim();
+                }
+            });
+
             const extraLabels = document.getElementById('modal-type-extra-rate').checked ? ['在线率'] : [];
             const generatedId = typeId || name.toLowerCase().replace(/[^a-z0-9]/g, '') || ('type_' + Date.now());
+            
+            // 获取计算配置
+            const calcConfig = getCalcConfig();
+            const calcType = calcTypeSelect.value;
+            
+            // 如果是结构化计算类型，生成对应的 formulas
+            let finalFormulas = formulas;
+            if (calcType === 'percentage' && calcConfig) {
+                const numerator = calcConfig.numerator;
+                const denomExpr = calcConfig.denominator_type === 'fixed' 
+                    ? calcConfig.denominator 
+                    : calcConfig.denominator;
+                finalFormulas = {
+                    [calcConfig.result_name]: `${numerator}/${denomExpr}`
+                };
+                // 添加格式信息到 extra_labels
+                if (!extraLabels.includes('_pct_config')) {
+                    extraLabels.push('_pct_config');
+                }
+            } else if (calcType === 'sum' && calcConfig) {
+                finalFormulas = {
+                    [calcConfig.result_name]: calcConfig.fields.join('+')
+                };
+            } else if (calcType === 'difference' && calcConfig) {
+                finalFormulas = {
+                    [calcConfig.result_name]: `${calcConfig.minuend}-${calcConfig.subtrahend}`
+                };
+            }
+            
             const payload = {
                 id: generatedId,
                 name: name,
@@ -623,6 +1003,8 @@
                 description: document.getElementById('modal-type-desc').value.trim(),
                 detect_keywords: document.getElementById('modal-type-keywords').value.split('\n').map(s => s.trim()).filter(Boolean),
                 labels: labels,
+                formulas: finalFormulas,
+                calc_config: calcConfig,
                 extra_labels: extraLabels,
                 result_rules: rules,
                 number_before_label: document.getElementById('modal-type-num-before').checked,
@@ -1000,5 +1382,30 @@
 }
 .card-summary::-webkit-details-marker { display: none; }
 .card-summary::marker { display: none; content: ''; }
+.calc-percentage-panel {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem;
+}
+.calc-fields-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.calc-fields-checkboxes .form-check {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    margin: 0;
+    font-size: 0.82rem;
+}
+.calc-fields-checkboxes .form-check:hover {
+    border-color: var(--accent);
+}
+.calc-fields-checkboxes .form-check-input:checked + .form-check-label {
+    color: var(--accent);
+}
 </style>
 {% endblock %}

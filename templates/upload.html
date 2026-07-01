@@ -67,6 +67,7 @@
     let currentImage = null;
     let currentItems = [];
     let currentFilename = '';
+    let currentLastModified = null;
 
     dropZone.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
@@ -93,6 +94,7 @@
         if (!file || !file.type.startsWith('image/')) return;
         // 提取文件名（去掉扩展名）
         currentFilename = file.name ? file.name.replace(/\.[^.]+$/, '') : '';
+        currentLastModified = file.lastModified || null;
         const reader = new FileReader();
         reader.onload = (e) => {
             currentImage = e.target.result;
@@ -131,7 +133,7 @@
             const resp = await fetch('/api/ocr', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({image: currentImage, filename: currentFilename})
+                body: JSON.stringify({image: currentImage, filename: currentFilename, last_modified: currentLastModified})
             });
             const data = await resp.json();
             if (data.error) {
@@ -219,7 +221,7 @@
             item.point_id = matchedPoint ? matchedPoint.id : null;
             item.inspector_id = matchedInspector ? matchedInspector.id : null;
 
-            const timestamp = item.timestamp ? formatTime(item.timestamp) : '未知时间';
+            const timestamp = item.file_creation_time || (item.timestamp ? formatTime(item.timestamp) : '未知时间');
             const resultBadge = item.result === '正常' 
                 ? '<span class="result-badge result-ok">正常</span>'
                 : item.result === '异常'
@@ -435,7 +437,8 @@
             }
             let msg = `成功保存 ${data.saved} 条巡检记录`;
             if (data.created > 0) msg += `，自动创建 ${data.created} 个新位置`;
-            if (data.skipped > 0) msg += `，${data.skipped} 条未匹配到位置`;
+            if (data.skipped_no_match > 0) msg += `，${data.skipped_no_match} 条未匹配到位置`;
+            if (data.skipped_duplicate > 0) msg += `，${data.skipped_duplicate} 条重复跳过`;
             var viewLink = data.object_id ? ` <a href="/object/${data.object_id}" class="btn btn-sm btn-outline-primary" style="text-decoration:none;">查看 →</a>` : '';
             saveStatus.innerHTML = `<div class="alert alert-success">${msg}${viewLink}</div>`;
             btnSave.style.display = 'none';

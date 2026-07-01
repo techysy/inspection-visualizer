@@ -20,6 +20,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def get_image_creation_time(file_storage):
+    """从图片EXIF获取拍摄时间，失败则返回None"""
+    try:
+        file_storage.seek(0)
+        img = Image.open(file_storage)
+        exif_data = img._getexif()
+        if exif_data:
+            # EXIF tag 36867 = DateTimeOriginal
+            date_taken = exif_data.get(36867)
+            if date_taken:
+                dt = datetime.strptime(date_taken, '%Y:%m:%d %H:%M:%S')
+                logger.info(f'  IMAGE: EXIF拍摄时间 {dt}')
+                file_storage.seek(0)
+                return dt
+            # EXIF tag 306 = DateTime
+            date_modified = exif_data.get(306)
+            if date_modified:
+                dt = datetime.strptime(date_modified, '%Y:%m:%d %H:%M:%S')
+                logger.info(f'  IMAGE: EXIF修改时间 {dt}')
+                file_storage.seek(0)
+                return dt
+    except Exception as e:
+        logger.info(f'  IMAGE: EXIF读取失败 {e}')
+    file_storage.seek(0)
+    return None
+logger = logging.getLogger(__name__)
+
 OCR_CONFIG_PATH = Path(__file__).parent / 'ocr_config.json'
 DASHBOARD_TYPES_PATH = Path(__file__).parent / 'dashboard_types.json'
 
@@ -362,7 +390,8 @@ _default_global_vars = {
     'skip_words': [
         '监控点总数', '在线', '离线', '未检测', '监控点在线率', '默认区域设置', 'admin',
         '车辆总数', '在线车辆', '今日上线', '报警车辆', '全部车辆', '全部状态',
-        '工牌', '全部', '未用', '请输入'
+        '工牌', '全部', '未用', '请输入', '总数', '行驶', '停车', '告警',
+        '在线率', '离线率', '未检测率'
     ],
     'location_aliases': {}
 }
@@ -374,7 +403,13 @@ def _load_global_vars():
             with open(GLOBAL_VARS_PATH, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             merged = dict(_default_global_vars)
-            merged.update(data)
+            # 合并 skip_words：合并默认值和已保存的值，去重
+            if 'skip_words' in data:
+                merged['skip_words'] = list(dict.fromkeys(_default_global_vars['skip_words'] + data['skip_words']))
+            else:
+                merged['skip_words'] = _default_global_vars['skip_words']
+            if 'location_aliases' in data:
+                merged['location_aliases'] = {**_default_global_vars.get('location_aliases', {}), **data['location_aliases']}
             return merged
         except Exception:
             pass
@@ -531,9 +566,17 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
             pending_labels = []
             continue
 
-        pending_labels = []
-        if unmatched_lines is not None and len(line) >= 2 and not re.match(r'^\d+$', line):
-            unmatched_lines.append(line)
+        # 如果行本身就是一个标签名（没有数字），加入待处理队列等待下一行的数字
+        if not line_matched:
+            for label in sorted_labels:
+                if line.strip() == label:
+                    pending_labels = [label]
+                    logger.info(f'  PARSE: 标签行 "{label}" 等待数字')
+                    break
+            else:
+                pending_labels = []
+                if unmatched_lines is not None and len(line) >= 2 and not re.match(r'^\d+$', line):
+                    unmatched_lines.append(line)
 
     # 识别在线率百分比（如果有 extra_labels 包含"在线率"）
     extra_labels = matched_type.get('extra_labels', [])
@@ -559,23 +602,65 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
             logger.info(f'  PARSE: 在线率100%, 修正 offline {known_offline}->0')
             metrics['offline'] = 0
 
-    # 识别区域名称
-    ocr_location = _extract_location_from_lines(lines)
-    if ocr_location:
-        logger.info(f'  PARSE: 从OCR文本提取位置: {ocr_location}')
-    region_name = ocr_location
-    if not region_name and filename:
-        region_name = _extract_location_from_lines([filename])
-        if region_name:
-            logger.info(f'  PARSE: 从文件名提取位置: {region_name}')
+    # 计算型指标：根据公式计算
+    formulas = matched_type.get('formulas', {})
+    calc_config = matched_type.get('calc_config', None)
+    if formulas:
+        for target_key, formula in formulas.items():
+            try:
+                # 替换公式中的key名为对应的值（按长度倒序，避免短名误替换长名）
+                eval_expr = formula
+                sorted_keys = sorted(label_map.items(), key=lambda x: len(x[1]), reverse=True)
+                for cn_label, short_key in sorted_keys:
+                    val = metrics.get(short_key, 0)
+                    eval_expr = eval_expr.replace(short_key, str(val))
+                # 支持 + - * / 运算
+                result = eval(eval_expr)
+                
+                # 应用 calc_config 格式化（仅对百分比类型）
+                if calc_config and calc_config.get('type') == 'percentage' and target_key == calc_config.get('result_name'):
+                    decimal_places = calc_config.get('decimal_places', 2)
+                    fmt = calc_config.get('format', 'decimal')
+                    result = round(float(result), decimal_places)
+                    if fmt == 'percent':
+                        # 百分比格式：存储为小数，显示时乘以100
+                        metrics[target_key] = result
+                        metrics[f'{target_key}_display'] = f'{result * 100:.{decimal_places}f}%'
+                    else:
+                        metrics[target_key] = result
+                elif isinstance(result, float) and result == int(result):
+                    result = int(result)
+                    metrics[target_key] = result
+                else:
+                    metrics[target_key] = result
+                    
+                logger.info(f'  PARSE: 计算指标 {target_key} = {formula} = {result}')
+            except Exception as e:
+                logger.info(f'  PARSE: 公式计算失败 {target_key}={formula}: {e}')
 
-    # 应用位置别名
-    if region_name:
-        gvars = _load_global_vars()
-        aliases = gvars.get('location_aliases', {})
-        if region_name in aliases:
-            logger.info(f'  PARSE: 位置别名 {region_name} -> {aliases[region_name]}')
-            region_name = aliases[region_name]
+    # 识别区域名称（跳过位置匹配时不提取）
+    skip_location = matched_type.get('skip_location_match', False) if matched_type else False
+    ocr_location = ''
+    region_name = ''
+    if not skip_location:
+        ocr_location = _extract_location_from_lines(lines)
+        if ocr_location:
+            logger.info(f'  PARSE: 从OCR文本提取位置: {ocr_location}')
+        region_name = ocr_location
+        if not region_name and filename:
+            region_name = _extract_location_from_lines([filename])
+            if region_name:
+                logger.info(f'  PARSE: 从文件名提取位置: {region_name}')
+
+        # 应用位置别名
+        if region_name:
+            gvars = _load_global_vars()
+            aliases = gvars.get('location_aliases', {})
+            if region_name in aliases:
+                logger.info(f'  PARSE: 位置别名 {region_name} -> {aliases[region_name]}')
+                region_name = aliases[region_name]
+    else:
+        logger.info(f'  PARSE: 跳过位置提取（skip_location_match=true）')
 
 
     # 从OCR文本中提取截图日期
@@ -682,6 +767,7 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
         'dashboard_type_name': matched_type['name'],
         'dashboard_category': matched_type.get('category', matched_type['name']),
         'skip_location_match': matched_type.get('skip_location_match', False),
+        'metrics': metrics,
     }
 
     return result_data
@@ -1700,6 +1786,25 @@ def api_ocr():
 
     filename = data.get('filename', '')  # 获取文件名
 
+    # 提取图片创建时间（EXIF 或文件修改时间）
+    last_modified = data.get('last_modified')
+    try:
+        image_bytes_for_exif = base64.b64decode(image_data)
+        file_obj = io.BytesIO(image_bytes_for_exif)
+        creation_time = get_image_creation_time(file_obj)
+    except Exception:
+        creation_time = None
+    # 如果EXIF无时间，使用文件修改时间
+    if not creation_time and last_modified:
+        try:
+            # last_modified 是毫秒时间戳
+            creation_time = datetime.fromtimestamp(last_modified / 1000)
+            logger.info(f'  IMAGE: 使用文件修改时间 {creation_time}')
+        except Exception:
+            pass
+    if not creation_time:
+        creation_time = datetime.now()
+
     config = _load_ocr_config()
     ignore_top = config.get('ignore_top', 0)
     ignore_bottom = config.get('ignore_bottom', 0)
@@ -1730,6 +1835,16 @@ def api_ocr():
             filtered_result.append(item)
 
     items = parse_inspection_form(filtered_result, filename=filename)
+
+    # 将图片创建时间注入每条记录
+    for item in items:
+        if item.get('is_dashboard'):
+            # 优先使用OCR文本中的日期，其次用图片创建时间
+            if not item.get('timestamp') or '截图' in item.get('timestamp', ''):
+                item['file_creation_time'] = creation_time.strftime('%Y-%m-%d %H:%M')
+            else:
+                item['file_creation_time'] = creation_time.strftime('%Y-%m-%d %H:%M')
+
     return jsonify({'items': items, 'raw_lines': [item[1] for item in filtered_result if item]})
 
 
@@ -1849,6 +1964,8 @@ def api_dashboard_types_add():
         'description': data.get('description', '').strip(),
         'detect_keywords': data.get('detect_keywords', []),
         'labels': data.get('labels', {}),
+        'formulas': data.get('formulas', {}),
+        'calc_config': data.get('calc_config', None),
         'extra_labels': data.get('extra_labels', []),
         'result_rules': data.get('result_rules', {}),
         'number_before_label': data.get('number_before_label', False),
@@ -1890,6 +2007,8 @@ def api_dashboard_types_update(type_id):
                 'description': data.get('description', t['description']),
                 'detect_keywords': data.get('detect_keywords', t['detect_keywords']),
                 'labels': data.get('labels', t['labels']),
+                'formulas': data.get('formulas', t.get('formulas', {})),
+                'calc_config': data.get('calc_config', t.get('calc_config', None)),
                 'extra_labels': data.get('extra_labels', t.get('extra_labels', [])),
                 'result_rules': data.get('result_rules', t.get('result_rules', {})),
                 'number_before_label': data.get('number_before_label', t.get('number_before_label', False)),
@@ -2195,6 +2314,8 @@ def api_save():
     session = SessionLocal()
     saved = 0
     skipped = 0
+    skipped_duplicate = 0
+    skipped_no_match = 0
     created = 0
     last_object_id = None
     try:
@@ -2216,6 +2337,7 @@ def api_save():
 
             # 匹配巡检对象
             obj = None
+            skip_location = item.get('skip_location_match', False)
 
             # 优先使用前端已选择的 point_id（但 device_type 须匹配）
             if front_point_id:
@@ -2231,8 +2353,8 @@ def api_save():
             if not obj and object_name:
                 obj = _match_object(object_name, all_objects, expected_type=dashboard_category)
             
-            # 仪表盘格式：优先按位置匹配（仪表盘类型需 device_type 匹配）
-            if not obj and is_dashboard and location:
+            # 仪表盘格式：按位置匹配（跳过位置匹配时不执行）
+            if not obj and is_dashboard and location and not skip_location:
                 obj = _match_object_by_location(location, all_objects, expected_type=dashboard_category)
             
             # 仪表盘格式：如果没有位置匹配，尝试按仪表盘类型匹配
@@ -2250,6 +2372,7 @@ def api_save():
                     obj_location = location
                 else:
                     skipped += 1
+                    skipped_no_match += 1
                     continue
                 
                 obj = InspectionObject(
@@ -2277,9 +2400,15 @@ def api_save():
             if not inspector and all_inspectors:
                 inspector = all_inspectors[0]
 
-            # 解析时间
+            # 解析时间（优先使用图片创建时间）
             timestamp = None
-            if timestamp_str:
+            file_creation_time = item.get('file_creation_time')
+            if file_creation_time:
+                try:
+                    timestamp = datetime.strptime(file_creation_time, '%Y-%m-%d %H:%M')
+                except ValueError:
+                    pass
+            if not timestamp and timestamp_str:
                 if isinstance(timestamp_str, str):
                     try:
                         timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M')
@@ -2287,8 +2416,19 @@ def api_save():
                         timestamp = datetime.now()
                 else:
                     timestamp = timestamp_str
-            else:
+            if not timestamp:
                 timestamp = datetime.now()
+
+            # 重复检测：同一对象 + 同一精确时间（同一张图不能重复，但同一天不同图允许）
+            existing_record = session.query(InspectionRecord).filter(
+                InspectionRecord.object_id == obj.id,
+                InspectionRecord.timestamp == timestamp
+            ).first()
+            if existing_record:
+                logger.info(f'  SAVE: 跳过重复记录 obj={obj.id} time={timestamp}')
+                skipped += 1
+                skipped_duplicate += 1
+                continue
 
             # 根据指标阈值重新判断结果
             parsed_metrics = _parse_status_to_metrics(status_detail)
@@ -2411,7 +2551,7 @@ def api_save():
     finally:
         session.close()
 
-    return jsonify({'saved': saved, 'skipped': skipped, 'created': created, 'object_id': last_object_id})
+    return jsonify({'saved': saved, 'skipped': skipped, 'skipped_duplicate': skipped_duplicate, 'skipped_no_match': skipped_no_match, 'created': created, 'object_id': last_object_id})
 
 
 def _match_object(name, all_objects, expected_type=None):

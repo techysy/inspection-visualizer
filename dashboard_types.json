@@ -11,9 +11,10 @@
         "监控点"
       ],
       "labels": {
-        "在线": "在线",
-        "在线率": "在线率"
+        "离线": "offline",
+        "未检测": "undetected"
       },
+      "formulas": {},
       "extra_labels": [
         "在线率"
       ],
@@ -27,20 +28,26 @@
       "category": "车辆",
       "description": "车辆管理仪表盘",
       "detect_keywords": [
-        "在线车辆",
-        "车辆总数",
-        "环卫车辆管理"
+        "停车",
+        "行驶"
       ],
       "labels": {
-        "在线车辆": "在线车辆",
-        "车辆总数": "车辆总数"
+        "停车": "在线没行驶",
+        "在线": "在线车辆",
+        "在线率": "在线率",
+        "行驶": "行驶车辆"
       },
-      "extra_labels": [],
+      "extra_labels": [
+        "在线率"
+      ],
       "result_rules": {
         "alarm>0": "异常"
       },
       "number_before_label": false,
-      "skip_location_match": true
+      "skip_location_match": true,
+      "formulas": {
+        "在线车辆": "行驶+停车"
+      }
     },
     {
       "id": "badge",
