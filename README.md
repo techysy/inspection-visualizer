@@ -15,7 +15,8 @@
 - 👥 **人员管理**：管理巡检人员/班组信息
 - 🎨 **主题切换**：深色 / 浅色 / 跟随系统，偏好本地保存
 - 🔎 **双维度筛选**：按位置 + 分类组合筛选巡检对象
-- 📤 **数据导出**：下拉菜单导出为 JSON / 自包含 HTML 文件
+- 📤 **数据导出**：下拉菜单导出为 JSON / 自包含 HTML 文件 / Excel 巡检报告（含在线率、离线自动计算）
+- 🗂️ **历史记录按周折叠**：详情页历史记录按本周/上周/更早分组，上周及更早自动收起
 - 📥 **批量导入**：支持 Markdown 表格、CSV、JSON 格式，两步操作（识别预览 → 确认导入）
 - 🔧 **全局变量**：可配置 OCR 位置提取时的跳过关键词
 - 🚫 **位置匹配开关**：仪表盘类型可设置「不使用位置匹配」，仅通过类型分类匹配
@@ -80,6 +81,7 @@ python app.py
 
 - ➕ 添加巡检对象（名称、位置、类型、描述）
 - ✏️ 编辑对象信息
+- 🔀 拖拽排序（组内卡片拖拽重排，自动保存排序顺序）
 - 📋 复制对象（一键克隆，含指标配置，修改位置即可快速创建）
 - 🗑️ 删除对象（同时清除关联巡检记录）
 - ⚙️ **配置指标**：为每个对象添加需要跟踪的指标（如在线率、在线数、离线数等）
@@ -169,6 +171,7 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `device_type` | String(50) | 类型：服务器/网络设备/存储/UPS等 |
 | `status` | String(20) | 状态：active/inactive/maintenance |
 | `description` | String(255) | 描述/备注 |
+| `sort_order` | Integer | 排序序号（拖拽排序存储） |
 | `created_at` | DateTime | 创建时间 |
 
 ### 📊 object_metrics（指标配置）
@@ -237,6 +240,7 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/objects/<id>/metrics/<mid>` | PUT | ✏️ 更新指标配置 |
 | `/api/objects/<id>/metrics/<mid>` | DELETE | 🗑️ 删除指标配置 |
 | `/api/objects/quick-create` | POST | ⚡ 快速创建巡检对象（JSON API） |
+| `/api/objects/sort` | POST | 🔄 保存巡检对象拖拽排序（`{order: [{id:1}, ...]}`） |
 | `/api/objects/<id>/sync-metrics` | POST | 🔄 从仪表盘类型同步指标配置 |
 | `/api/dashboard-types` | GET | 📋 获取所有仪表盘类型 |
 | `/api/dashboard-types` | POST | ➕ 添加仪表盘类型 |
@@ -253,6 +257,7 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/records/import` | POST | 📥 批量导入巡检记录 |
 | `/api/inspection_history/<id>` | GET | 📜 巡检历史 JSON API |
 | `/api/inspection_history/delete/<id>` | POST | 🗑️ 删除巡检记录 |
+| `/api/export/excel` | GET/POST | 📤 导出巡检报告 Excel（含在线率、离线计算） |
 | `/export/json` | GET | 📤 导出全部数据 JSON |
 | `/export/html` | GET | 🌐 导出全部数据 HTML |
 

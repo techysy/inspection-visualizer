@@ -3,21 +3,68 @@
 {% block title %}巡检数据可视化{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-5">
+<div class="d-flex justify-content-between align-items-start mb-4">
     <div>
-        <h1 class="mb-2">巡检数据可视化</h1>
-        <p class="text-muted">IT运维巡检记录管理与可视化分析</p>
+        <h1 class="mb-1">巡检数据可视化</h1>
+        <p class="text-muted" style="font-size:0.85rem">IT运维巡检记录管理与可视化分析</p>
+    </div>
+    <div>
+        <button class="btn btn-outline-success btn-sm" id="btn-export" style="border-radius:8px;font-size:0.82rem;">
+            📊 导出巡检报告
+        </button>
+    </div>
+</div>
+
+<!-- 状态汇总栏 -->
+<div class="stats-bar mb-4">
+    <div class="stat-item">
+        <span class="stat-num">{{ stats.total }}</span>
+        <span class="stat-label">全部</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item stat-normal">
+        <span class="stat-num">{{ stats.normal }}</span>
+        <span class="stat-label">正常</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item stat-warning">
+        <span class="stat-num">{{ stats.warning }}</span>
+        <span class="stat-label">需关注</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item stat-error">
+        <span class="stat-num">{{ stats.error }}</span>
+        <span class="stat-label">异常</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item stat-norecord">
+        <span class="stat-num">{{ stats.no_record }}</span>
+        <span class="stat-label">未巡检</span>
     </div>
 </div>
 
 {% if object_data %}
-<div class="filter-section mb-3">
-    <div class="filter-label">位置</div>
-    <div class="filter-bar">
-        <button class="filter-btn active" data-filter="all" data-group="location">全部</button>
-        {% for loc in all_locations %}
-        <button class="filter-btn" data-filter="{{ loc }}" data-group="location">{{ loc }}</button>
-        {% endfor %}
+<!-- 显示设置 + 筛选栏 -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="filter-section">
+        <div class="filter-label">位置</div>
+        <div class="filter-bar">
+            <button class="filter-btn active" data-filter="all" data-group="location">全部</button>
+            {% for loc in all_locations %}
+            <button class="filter-btn" data-filter="{{ loc }}" data-group="location">{{ loc }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" style="border-radius:8px;font-size:0.8rem;">
+            显示字段
+        </button>
+        <div class="dropdown-menu dropdown-menu-end" style="min-width:180px;padding:0.5rem;">
+            <label class="dropdown-item-text"><input type="checkbox" class="form-check-input me-1 field-toggle" data-field="location" checked>位置</label>
+            <label class="dropdown-item-text"><input type="checkbox" class="form-check-input me-1 field-toggle" data-field="device_type" checked>类型</label>
+            <label class="dropdown-item-text"><input type="checkbox" class="form-check-input me-1 field-toggle" data-field="time" checked>时间</label>
+            <label class="dropdown-item-text"><input type="checkbox" class="form-check-input me-1 field-toggle" data-field="metrics" checked>指标</label>
+        </div>
     </div>
 </div>
 <div class="filter-section mb-4">
@@ -35,25 +82,37 @@
     {% if item.latest_record %}
     <div class="col-md-4 mb-4 object-item"
          data-location="{{ item.object.location or '' }}"
-         data-device-type="{{ item.object.device_type or '' }}">
+         data-device-type="{{ item.object.device_type or '' }}"
+         data-name="{{ item.object.name or '' }}"
+         data-skip-location="{{ 'true' if item.skip_location else 'false' }}"
+         data-sort-order="{{ item.sort_order }}">
         <a href="/object/{{ item.object.id }}" class="text-decoration-none" style="color: inherit;">
-            <div class="card film-card">
+            <div class="card film-card {% if not item.today_record %}card-no-inspect{% endif %}">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <h5 class="card-title" style="font-size: 1rem; gap: 0;">{{ item.object.name }}</h5>
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h5 class="card-title" style="font-size: 1rem; margin:0;">{{ item.object.name }}</h5>
                         {% if item.latest_record.result == '正常' %}
-                        <span class="badge bg-success" style="font-size:0.75rem;">正常</span>
+                        <span class="badge bg-success" style="font-size:0.72rem;">正常</span>
                         {% elif item.latest_record.result == '异常' %}
-                        <span class="badge bg-danger" style="font-size:0.75rem;">异常</span>
+                        <span class="badge bg-danger" style="font-size:0.72rem;">异常</span>
                         {% else %}
-                        <span class="badge bg-warning" style="font-size:0.75rem;">需关注</span>
+                        <span class="badge bg-warning" style="font-size:0.72rem;">需关注</span>
                         {% endif %}
                     </div>
                     <div class="film-meta">
-                        {% if item.object.location %}<span class="tag-format" style="font-weight:600;">{{ item.object.location }}</span>{% endif %}
-                        {% if item.object.device_type %}<span>{{ item.object.device_type }}</span>{% endif %}
-                        {% if item.latest_record.timestamp %}<span>{{ item.latest_record.timestamp.strftime('%Y.%m.%d') }}</span>{% endif %}
+                        {% if item.object.location %}<span class="tag-format field-location" style="font-weight:600;">{{ item.object.location }}</span>{% endif %}
+                        {% if item.object.device_type %}<span class="field-device_type">{{ item.object.device_type }}</span>{% endif %}
+                        {% if item.latest_record.timestamp %}<span class="field-time" data-ts="{{ item.latest_record.timestamp.isoformat() }}">{{ item.latest_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% endif %}
                     </div>
+                    {% if item.latest_metrics %}
+                    <div class="metrics-preview field-metrics">
+                        {% for key, val in item.latest_metrics.items() %}
+                            {% if not key.startswith('_') and key != 'total' and key != 'online' and key != 'offline' and key != 'undetected' %}
+                            <span class="metric-val">{{ key }}: {{ val }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </a>
@@ -81,6 +140,56 @@
 {% endif %}
 
 <style>
+    .stats-bar {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.75rem 1.5rem;
+    }
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 0 1.2rem;
+    }
+    .stat-num {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--text-heading);
+        line-height: 1.2;
+    }
+    .stat-label {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+    }
+    .stat-divider {
+        width: 1px;
+        height: 28px;
+        background: var(--border);
+    }
+    .stat-normal .stat-num { color: var(--success); }
+    .stat-warning .stat-num { color: #f59e0b; }
+    .stat-error .stat-num { color: var(--danger); }
+    .stat-norecord .stat-num { color: var(--text-muted); }
+    .card-no-inspect {
+        border-left: 3px solid #f59e0b !important;
+    }
+    .metrics-preview {
+        margin-top: 0.5rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+    .metric-val {
+        font-size: 0.72rem;
+        color: var(--text-secondary);
+        background: var(--bg-input);
+        padding: 0.15rem 0.45rem;
+        border-radius: 4px;
+    }
     .filter-section {
         display: flex;
         align-items: center;
@@ -117,6 +226,52 @@
         border-color: var(--primary-border);
         color: var(--accent);
     }
+    .dropdown-item-text {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.82rem;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+    .dropdown-item-text:hover {
+        background: var(--bg-input);
+    }
+    #export-modal .modal-dialog {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.25rem;
+        width: 340px;
+        margin: auto;
+        pointer-events: auto;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    #export-modal .modal-dialog h5 {
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        font-size: 1rem;
+    }
+    .export-obj-item {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.3rem 0.4rem;
+        font-size: 0.82rem;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+    .export-obj-item:hover {
+        background: var(--bg-input);
+    }
+    .modal-mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        padding: 1rem;
+    }
 </style>
 
 <script>
@@ -135,8 +290,7 @@ document.addEventListener('DOMContentLoaded', function() {
         items.forEach(function(item) {
             var loc = item.getAttribute('data-location');
             var dtype = item.getAttribute('data-device-type');
-            var showLoc = activeLocation === 'all' || loc === activeLocation ||
-                (activeLocation === '其他' && loc !== '机房A' && loc !== '机房B' && loc !== '数据中心');
+            var showLoc = activeLocation === 'all' || loc === activeLocation;
             var showType = activeType === 'all' || dtype === activeType;
             var show = showLoc && showType;
             item.style.display = show ? '' : 'none';
@@ -163,6 +317,144 @@ document.addEventListener('DOMContentLoaded', function() {
             applyFilters();
         });
     });
+
+    // 显示字段切换（持久化到 localStorage）
+    var STORAGE_KEY = 'index_field_toggle';
+    function loadFieldSettings() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; }
+    }
+    function saveFieldSettings(settings) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    }
+    var savedSettings = loadFieldSettings();
+    document.querySelectorAll('.field-toggle').forEach(function(cb) {
+        var field = cb.getAttribute('data-field');
+        // 恢复保存的状态
+        if (field in savedSettings) {
+            cb.checked = savedSettings[field];
+        }
+        // 应用初始状态
+        var els = document.querySelectorAll('.field-' + field);
+        els.forEach(function(el) { el.style.display = cb.checked ? '' : 'none'; });
+        // 监听变更
+        cb.addEventListener('change', function() {
+            var settings = loadFieldSettings();
+            settings[field] = cb.checked;
+            saveFieldSettings(settings);
+            var els = document.querySelectorAll('.field-' + field);
+            els.forEach(function(el) { el.style.display = cb.checked ? '' : 'none'; });
+        });
+    });
+
+    // 导出 Excel - 弹出选择对话框
+    document.getElementById('btn-export').addEventListener('click', function() {
+        // 构建对象列表并按 sort_order 排序
+        var objList = [];
+        document.querySelectorAll('.object-item').forEach(function(el) {
+            var name = el.getAttribute('data-name') || '';
+            var loc = el.getAttribute('data-location') || '';
+            var dtype = el.getAttribute('data-device-type') || '其他';
+            var skipLoc = el.getAttribute('data-skip-location') === 'true';
+            var sortOrder = parseInt(el.getAttribute('data-sort-order')) || 0;
+            var label = skipLoc ? name : (loc || name);
+            objList.push({name: name, location: loc, type: dtype, label: label, skipLocation: skipLoc, sortOrder: sortOrder});
+        });
+        // 按 sort_order 排序，再按类型分组
+        objList.sort(function(a, b) { return a.sortOrder - b.sortOrder || a.type.localeCompare(b.type) || a.label.localeCompare(b.label); });
+        // 按类型分组
+        var grouped = {};
+        var typeOrder = [];
+        objList.forEach(function(o) {
+            if (!grouped[o.type]) { grouped[o.type] = []; typeOrder.push(o.type); }
+            grouped[o.type].push(o);
+        });
+        // 按数量降序排列类型
+        typeOrder.sort(function(a, b) { return grouped[b].length - grouped[a].length; });
+        // 渲染对话框
+        var html = '<div id="export-modal" class="modal-mask" style="display:none"><div class="modal-dialog">';
+        html += '<h5>导出巡检报告</h5>';
+        html += '<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem;">选择要导出的巡检对象</div>';
+        html += '<div style="margin-bottom:0.5rem;"><label style="font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:0.3rem;"><input type="checkbox" id="export-select-all" class="form-check-input" style="margin:0;"> <span>全选</span></label></div>';
+        html += '<div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.4rem 0.5rem;">';
+        var typeIndex = 0;
+        typeOrder.forEach(function(dtype) {
+            var items = grouped[dtype];
+            if (typeIndex > 0) html += '<div style="border-top:1px solid var(--border);margin:0.4rem 0;"></div>';
+            html += '<div style="font-size:0.72rem;color:var(--text-muted);font-weight:600;margin:0.3rem 0 0.2rem;">' + dtype + ' (' + items.length + ')</div>';
+            items.forEach(function(o) {
+                var idx = objList.indexOf(o);
+                html += '<label class="export-obj-item">';
+                html += '<input type="checkbox" class="form-check-input export-obj-cb" value="' + idx + '" style="margin:0;">';
+                html += '<span>' + o.label + '</span>';
+                html += '</label>';
+            });
+            typeIndex++;
+        });
+        html += '</div>';
+        html += '<div class="d-flex gap-2 mt-3">';
+        html += '<button class="btn btn-primary flex-fill" id="export-confirm">导出</button>';
+        html += '<button class="btn btn-outline-secondary" id="export-cancel">取消</button>';
+        html += '</div></div></div>';
+        document.body.insertAdjacentHTML('beforeend', html);
+        var modal = document.getElementById('export-modal');
+        modal.style.display = 'flex';
+        // 全选/取消
+        document.getElementById('export-select-all').addEventListener('change', function() {
+            var checked = this.checked;
+            document.querySelectorAll('.export-obj-cb').forEach(function(cb) { cb.checked = checked; });
+        });
+        // 取消
+        document.getElementById('export-cancel').addEventListener('click', function() { modal.remove(); });
+        modal.addEventListener('mousedown', function(e) { if (e.target === modal) modal.remove(); });
+        // 确认导出
+        document.getElementById('export-confirm').addEventListener('click', function() {
+            var selected = [];
+            document.querySelectorAll('.export-obj-cb:checked').forEach(function(cb) {
+                selected.push(objList[parseInt(cb.value)]);
+            });
+            modal.remove();
+            if (selected.length === 0) return;
+            var today = new Date();
+            var dateStr = today.getFullYear().toString() +
+                          (today.getMonth() + 1).toString().padStart(2, '0') +
+                          today.getDate().toString().padStart(2, '0');
+            fetch('/api/export/excel', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({date: dateStr, objects: selected})
+            }).then(function(resp) { return resp.blob(); }).then(function(blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url; a.download = dateStr + ' 巡检报告.xlsx'; a.click();
+                URL.revokeObjectURL(url);
+            });
+        });
+    });
+
+    // 相对时间
+    function updateRelativeTime() {
+        var now = new Date();
+        document.querySelectorAll('.field-time[data-ts]').forEach(function(el) {
+            var ts = el.getAttribute('data-ts');
+            if (!ts) return;
+            var d = new Date(ts);
+            var diff = Math.floor((now - d) / 1000);
+            var text = '';
+            if (diff < 60) text = '刚刚';
+            else if (diff < 3600) text = Math.floor(diff / 60) + '分钟前';
+            else if (diff < 86400) text = Math.floor(diff / 3600) + '小时前';
+            else if (diff < 172800) text = '昨天';
+            else text = Math.floor(diff / 86400) + '天前';
+            el.textContent = text;
+            // 超过1天标红
+            if (diff > 86400) {
+                el.style.color = 'var(--danger)';
+            } else {
+                el.style.color = '';
+            }
+        });
+    }
+    updateRelativeTime();
 });
 </script>
 {% endblock %}

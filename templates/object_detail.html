@@ -147,32 +147,33 @@
         };
 
         var statusY = { '正常': 1, '异常': 0, '需关注': 0.5 };
-        var allData = [];
+        var rawData = [];
         {% for result, data in result_timeline.items() %}
             {% for item in data %}
-                allData.push({{ item|tojson }});
+                rawData.push({{ item|tojson }});
             {% endfor %}
         {% endfor %}
-        allData.sort(function(a, b) { return a.x - b.x; });
-        allData = allData.filter(function(d) {
-            var dt = new Date(d.x);
-            var day = dt.getDay();
-            return day !== 0 && day !== 6;
-        });
-        allData.forEach(function(d) { d.y = statusY[d.result] !== undefined ? statusY[d.result] : 0.5; });
+        rawData.sort(function(a, b) { return a.x - b.x; });
 
-        var pointColors = allData.map(function(d) { return colors[d.result] || '#818cf8'; });
+        var visibleLabels = rawData.map(function(d) {
+            var dt = new Date(d.x);
+            return dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0');
+        });
+        var visibleValues = rawData.map(function(d) { return statusY[d.result] !== undefined ? statusY[d.result] : 0.5; });
+        var visibleMeta = rawData;
 
         datasets = [{
             label: '巡检结果',
-            data: allData,
+            data: visibleValues,
             borderColor: '#818cf8',
             backgroundColor: '#818cf815',
             borderWidth: 2,
             tension: 0.4,
             pointRadius: 5,
             pointHoverRadius: 7,
-            pointBackgroundColor: pointColors,
+            pointBackgroundColor: function(ctx) {
+                return colors[visibleMeta[ctx.dataIndex].result] || '#818cf8';
+            },
             pointBorderColor: cv('--bg'),
             pointBorderWidth: 2,
             fill: false,
@@ -189,7 +190,7 @@
 
         var chart = new Chart(ctx, {
             type: 'line',
-            data: { datasets: datasets },
+            data: { labels: visibleLabels, datasets: datasets },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -198,17 +199,8 @@
                 layout: { padding: { bottom: 0 } },
                 scales: {
                     x: {
-                        type: 'time',
-                        time: { unit: 'day', displayFormats: { day: 'yyyy.MM.dd' }, tooltipFormat: 'yyyy.MM.dd' },
                         grid: { color: cv('--grid-line'), drawBorder: false },
-                        afterBuildTicks: function(axis) {
-                            axis.ticks = axis.ticks.filter(function(tick) {
-                                var d = new Date(tick.value);
-                                var day = d.getUTCDay();
-                                return day !== 0 && day !== 6;
-                            });
-                        },
-                        ticks: { color: cv('--text-dim'), font: { size: 11 }, callback: function(v) { var d = new Date(v); return d.getUTCFullYear() + '.' + String(d.getUTCMonth()+1).padStart(2,'0') + '.' + String(d.getUTCDate()).padStart(2,'0'); } },
+                        ticks: { color: cv('--text-dim'), font: { size: 11 }, maxTicksLimit: 30 },
                         title: { display: true, text: '日期', color: cv('--text-dim'), font: { size: 11, weight: 500 } }
                     },
                     y: {
@@ -240,16 +232,13 @@
                         titleFont: { weight: 600 },
                         callbacks: {
                             title: function(items) {
-                                if (items.length) {
-                                    var d = new Date(items[0].parsed.x);
-                                    var y = d.getFullYear();
-                                    var m = String(d.getMonth() + 1).padStart(2, '0');
-                                    var day = String(d.getDate()).padStart(2, '0');
-                                    return y + '.' + m + '.' + day;
-                                }
+                                if (items.length) return items[0].label;
                                 return '';
                             },
-                            label: function(c) { return c.raw.result + ' (巡检人: ' + c.raw.inspector + ')'; }
+                            label: function(c) {
+                                var d = visibleMeta[c.dataIndex];
+                                return d.result + ' (巡检人: ' + d.inspector + ')';
+                            }
                         }
                     },
                     legend: {
@@ -316,35 +305,69 @@
                     el.innerHTML = '<p class="text-muted" style="font-size:0.85rem;">暂无记录</p>';
                     return;
                 }
-                var html = '<div style="max-height:400px;overflow-y:auto;">';
+                // 按周分组，本周展开，上周及更早自动收起
+                var now = new Date();
+                var dow = now.getDay();
+                var monOff = dow === 0 ? -6 : 1 - dow;
+                var thisMon = new Date(now);
+                thisMon.setDate(now.getDate() + monOff);
+                thisMon.setHours(0, 0, 0, 0);
+                var lastMon = new Date(thisMon);
+                lastMon.setDate(thisMon.getDate() - 7);
+
+                var weekGroups = [];
+                var thisWeekItems = [], lastWeekItems = [], earlierItems = [];
                 data.forEach(function(item) {
-                    var date = '未知';
-                    if (item.timestamp) {
-                        var d = new Date(item.timestamp);
-                        date = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
-                    }
-                    var badgeClass = item.result === '正常' ? 'bg-success' : item.result === '异常' ? 'bg-danger' : 'bg-warning';
-                    var metricsText = '';
-                    if (metricsConfig.length > 0 && item.metrics) {
-                        var parts = [];
-                        metricsConfig.forEach(function(mc) {
-                            var val = item.metrics[mc.name] || item.metrics[mc.key];
-                            if (val !== undefined && val !== null && val !== '') {
-                                parts.push(mc.name + ': ' + fmtVal(mc, val));
-                            }
-                        });
-                        if (parts.length > 0) metricsText = parts.join('; ');
-                    }
-                    var detailText = metricsText || item.status_detail || '';
-                    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);font-size:0.85rem;">' +
-                        '<div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">' +
-                        '<span style="color:var(--text-muted);white-space:nowrap;">' + date + '</span>' +
-                        '<span class="badge ' + badgeClass + '" style="font-size:0.75rem;">' + escHtml(item.result) + '</span>' +
-                        '<span style="color:var(--text-muted);white-space:nowrap;">' + escHtml(item.inspector) + '</span>' +
-                        (detailText ? '<span style="color:var(--text-secondary);font-size:0.78rem;">' + escHtml(detailText) + '</span>' : '') +
+                    var d = new Date(item.timestamp);
+                    if (d >= thisMon) thisWeekItems.push(item);
+                    else if (d >= lastMon) lastWeekItems.push(item);
+                    else earlierItems.push(item);
+                });
+                if (thisWeekItems.length) weekGroups.push({ label: '本周', items: thisWeekItems, collapsed: false });
+                if (lastWeekItems.length) weekGroups.push({ label: '上周', items: lastWeekItems, collapsed: true });
+                if (earlierItems.length) weekGroups.push({ label: '更早', items: earlierItems, collapsed: true });
+
+                var weekId = 0;
+                var html = '<div style="max-height:400px;overflow-y:auto;">';
+                weekGroups.forEach(function(g) {
+                    var secId = 'week-group-' + (weekId++);
+                    html += '<div style="border-bottom:1px solid var(--border);">' +
+                        '<div onclick="toggleWeek(\'' + secId + '\')" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--text-secondary);background:var(--bg-elevated);user-select:none;border-radius:6px;margin:2px 0;">' +
+                        '<span id="' + secId + '-icon" style="transition:transform 0.2s;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;font-size:0.6rem;border-radius:4px;background:var(--border);color:var(--text-dim);">' + (g.collapsed ? '&#9654;' : '&#9660;') + '</span>' +
+                        '<span>' + g.label + '</span>' +
+                        '<span style="font-weight:400;color:var(--text-dim);font-size:0.75rem;">(' + g.items.length + ' 条)</span>' +
                         '</div>' +
-                        '<button class="btn btn-sm btn-outline-danger" style="padding:0.15rem 0.5rem;font-size:0.78rem;" onclick="deleteRecord(' + item.id + ', this)">删除</button>' +
-                        '</div>';
+                        '<div id="' + secId + '-body"' + (g.collapsed ? ' style="display:none;"' : '') + '>';
+                    g.items.forEach(function(item) {
+                        var date = '未知';
+                        if (item.timestamp) {
+                            var d = new Date(item.timestamp);
+                            date = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0');
+                        }
+                        var badgeClass = item.result === '正常' ? 'bg-success' : item.result === '异常' ? 'bg-danger' : 'bg-warning';
+                        var metricsText = '';
+                        if (metricsConfig.length > 0 && item.metrics) {
+                            var parts = [];
+                            metricsConfig.forEach(function(mc) {
+                                var val = item.metrics[mc.name] || item.metrics[mc.key];
+                                if (val !== undefined && val !== null && val !== '') {
+                                    parts.push(mc.name + ': ' + fmtVal(mc, val));
+                                }
+                            });
+                            if (parts.length > 0) metricsText = parts.join('; ');
+                        }
+                        var detailText = metricsText || item.status_detail || '';
+                        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);font-size:0.85rem;">' +
+                            '<div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">' +
+                            '<span style="color:var(--text-muted);white-space:nowrap;">' + date + '</span>' +
+                            '<span class="badge ' + badgeClass + '" style="font-size:0.75rem;width:3.2rem;text-align:center;">' + escHtml(item.result) + '</span>' +
+                            '<span style="color:var(--text-muted);white-space:nowrap;">' + escHtml(item.inspector) + '</span>' +
+                            (detailText ? '<span style="color:var(--text-secondary);font-size:0.78rem;">' + escHtml(detailText) + '</span>' : '') +
+                            '</div>' +
+                            '<button class="btn btn-sm btn-outline-danger" style="padding:0.15rem 0.5rem;font-size:0.78rem;" onclick="deleteRecord(' + item.id + ', this)">删除</button>' +
+                            '</div>';
+                    });
+                    html += '</div></div>';
                 });
                 html += '</div>';
                 el.innerHTML = html;
@@ -443,6 +466,18 @@
                 }
             });
         });
+    }
+
+    function toggleWeek(secId) {
+        var body = document.getElementById(secId + '-body');
+        var icon = document.getElementById(secId + '-icon');
+        if (body.style.display === 'none') {
+            body.style.display = '';
+            icon.innerHTML = '&#9660;';
+        } else {
+            body.style.display = 'none';
+            icon.innerHTML = '&#9654;';
+        }
     }
 
     function deleteRecord(id, btn) {

@@ -6,13 +6,13 @@
       "category": "监控",
       "description": "监控系统仪表盘",
       "detect_keywords": [
-        "智慧城管平台",
         "在线率",
+        "智慧城管平台",
         "监控点"
       ],
       "labels": {
-        "离线": "offline",
-        "未检测": "undetected"
+        "在线": "在线",
+        "在线率": "在线率"
       },
       "formulas": {},
       "extra_labels": [
@@ -29,13 +29,14 @@
       "description": "车辆管理仪表盘",
       "detect_keywords": [
         "停车",
+        "环卫车辆管理",
         "行驶"
       ],
       "labels": {
-        "停车": "在线没行驶",
-        "在线": "在线车辆",
+        "停车": "停车",
         "在线率": "在线率",
-        "行驶": "行驶车辆"
+        "行驶": "行驶",
+        "在线": "在线"
       },
       "extra_labels": [
         "在线率"
@@ -46,7 +47,17 @@
       "number_before_label": false,
       "skip_location_match": true,
       "formulas": {
-        "在线车辆": "行驶+停车"
+        "在线": "停车+行驶"
+      },
+      "calc_config": {
+        "type": "sum",
+        "result_name": "在线",
+        "fields": [
+          "停车",
+          "行驶"
+        ],
+        "show_chart": true,
+        "max_value": 89
       }
     },
     {

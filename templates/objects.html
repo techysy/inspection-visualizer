@@ -56,7 +56,8 @@
     </div>
     <div class="store-grid">
     {% for obj in items %}
-    <div class="store-card">
+    <div class="store-card" draggable="true" data-id="{{ obj.id }}" style="cursor:grab;position:relative;">
+        <div class="drag-handle" style="position:absolute;top:0;left:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:grab;color:var(--text-muted);font-size:11px;opacity:0.3;transition:opacity 0.15s;" title="拖动排序">⋮⋮</div>
         <div class="store-card-header">
             <div class="store-avatar" style="{% if obj.device_type == '服务器' %}background:linear-gradient(135deg, rgba(129,140,248,0.15), rgba(99,102,241,0.1));color:#6366f1;{% elif obj.device_type == '网络设备' %}background:linear-gradient(135deg, rgba(34,211,238,0.15), rgba(6,182,212,0.1));color:#06b6d4;{% elif obj.device_type == '存储' %}background:linear-gradient(135deg, rgba(52,211,153,0.15), rgba(16,185,129,0.1));color:#10b981;{% elif obj.device_type == 'UPS' %}background:linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1));color:#f59e0b;{% elif obj.device_type == '空调' %}background:linear-gradient(135deg, rgba(56,189,248,0.15), rgba(14,165,233,0.1));color:#0ea5e9;{% elif obj.device_type == '车辆' %}background:linear-gradient(135deg, rgba(244,114,182,0.15), rgba(236,72,153,0.1));color:#ec4899;{% elif obj.device_type == '工牌' %}background:linear-gradient(135deg, rgba(168,85,247,0.15), rgba(139,92,246,0.1));color:#a855f7;{% else %}background:linear-gradient(135deg, rgba(107,114,128,0.15), rgba(75,85,99,0.1));color:#6b7280;{% endif %}">{{ obj.name[0] }}</div>
             <div class="store-info">
@@ -498,6 +499,13 @@ document.addEventListener('DOMContentLoaded', function() {
     padding: 0.3rem 0;
     border-bottom: 1px solid var(--border);
 }
+.store-card:hover .drag-handle {
+    opacity: 0.7 !important;
+}
+.drag-handle:hover {
+    opacity: 1 !important;
+    color: var(--accent) !important;
+}
 </style>
 <script>
 function confirmDeleteObject(url, name) {
@@ -510,5 +518,55 @@ function confirmDeleteObject(url, name) {
         form.submit();
     });
 }
+// 拖动排序（组内）
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.store-grid').forEach(function(grid) {
+        var dragItem = null;
+        grid.addEventListener('dragstart', function(e) {
+            var card = e.target.closest('.store-card');
+            if (card && card.parentNode === grid) {
+                dragItem = card;
+                dragItem.style.opacity = '0.4';
+                e.dataTransfer.effectAllowed = 'move';
+            }
+        });
+        grid.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            if (!dragItem) return;
+            var target = e.target.closest('.store-card');
+            if (target && target !== dragItem && target.parentNode === grid) {
+                var rect = target.getBoundingClientRect();
+                var midY = rect.top + rect.height / 2;
+                if (e.clientY < midY) {
+                    grid.insertBefore(dragItem, target);
+                } else {
+                    grid.insertBefore(dragItem, target.nextSibling);
+                }
+            }
+        });
+        grid.addEventListener('dragend', function(e) {
+            if (dragItem) {
+                dragItem.style.opacity = '1';
+                dragItem = null;
+            }
+            // 保存组内排序
+            var cards = grid.querySelectorAll('.store-card');
+            var order = [];
+            cards.forEach(function(card) {
+                order.push({id: parseInt(card.getAttribute('data-id'))});
+            });
+            if (order.length > 0) {
+                fetch('/api/objects/sort', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({order: order})
+                });
+            }
+        });
+        grid.addEventListener('drop', function(e) {
+            e.preventDefault();
+        });
+    });
+});
 </script>
 {% endblock %}

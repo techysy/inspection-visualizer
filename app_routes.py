@@ -6,8 +6,10 @@ import logging
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
-from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response
+from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response, send_file
 from PIL import Image
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector, ObjectMetric, DailyListRecord
 
 logging.basicConfig(
@@ -854,14 +856,315 @@ def parse_traditional_form(lines):
     return results
 
 
+@main.route('/api/export/excel', methods=['GET', 'POST'])
+def api_export_excel():
+    """导出巡检报告 Excel"""
+    data = request.get_json() if request.method == 'POST' else {}
+    report_date = data.get('date', request.args.get('date', datetime.now().strftime('%Y%m%d')))
+    selected_objects = data.get('objects', None)  # [{name, location, type, label, skipLocation}]
+    
+    session = SessionLocal()
+    dashboard_types = _load_dashboard_types()
+    try:
+        # 如果有选中的对象，只导出这些
+        if selected_objects:
+            # 按位置分组（skipLocation的用name，其他的用location）
+            groups = {}
+            for sel in selected_objects:
+                obj_name = sel.get('name', '')
+                obj_location = sel.get('location', '')
+                skip_loc = sel.get('skipLocation', False)
+                filters = {'name': obj_name, 'status': 'active'}
+                if obj_location and not skip_loc:
+                    filters['location'] = obj_location
+                obj = session.query(InspectionObject).filter_by(**filters).first()
+                if not obj:
+                    continue
+                
+                group_key = sel.get('label', obj_name)
+                if group_key not in groups:
+                    groups[group_key] = []
+                
+                # 获取指定日期的巡检记录
+                try:
+                    target_date = datetime.strptime(report_date, '%Y%m%d')
+                except:
+                    target_date = datetime.now()
+                
+                day_start = target_date.replace(hour=0, minute=0, second=0)
+                day_end = target_date.replace(hour=23, minute=59, second=59)
+                
+                record = (
+                    session.query(InspectionRecord)
+                    .filter(InspectionRecord.object_id == obj.id,
+                            InspectionRecord.timestamp >= day_start,
+                            InspectionRecord.timestamp <= day_end)
+                    .order_by(InspectionRecord.timestamp.desc())
+                    .first()
+                )
+                
+                if not record:
+                    record = (
+                        session.query(InspectionRecord)
+                        .filter_by(object_id=obj.id)
+                        .order_by(InspectionRecord.timestamp.desc())
+                        .first()
+                    )
+                
+                metrics = {}
+                if record and record.metrics:
+                    try:
+                        metrics = json.loads(record.metrics)
+                    except:
+                        pass
+                
+                groups[group_key].append({
+                    'object': obj,
+                    'record': record,
+                    'metrics': metrics,
+                    'sort_order': obj.sort_order or 0,
+                })
+        else:
+            # 未选择则导出全部
+            objects = session.query(InspectionObject).filter_by(status='active').all()
+            groups = {}
+            for obj in objects:
+                skip_loc = False
+                if obj.device_type:
+                    for dt in _load_dashboard_types():
+                        if dt.get('category') == obj.device_type and dt.get('skip_location_match'):
+                            skip_loc = True
+                            break
+                group_key = obj.name if skip_loc else (obj.location or obj.name)
+                if group_key not in groups:
+                    groups[group_key] = []
+                
+                try:
+                    target_date = datetime.strptime(report_date, '%Y%m%d')
+                except:
+                    target_date = datetime.now()
+                
+                day_start = target_date.replace(hour=0, minute=0, second=0)
+                day_end = target_date.replace(hour=23, minute=59, second=59)
+                
+                record = (
+                    session.query(InspectionRecord)
+                    .filter(InspectionRecord.object_id == obj.id,
+                            InspectionRecord.timestamp >= day_start,
+                            InspectionRecord.timestamp <= day_end)
+                    .order_by(InspectionRecord.timestamp.desc())
+                    .first()
+                )
+                
+                if not record:
+                    record = (
+                        session.query(InspectionRecord)
+                        .filter_by(object_id=obj.id)
+                        .order_by(InspectionRecord.timestamp.desc())
+                        .first()
+                    )
+                
+                metrics = {}
+                if record and record.metrics:
+                    try:
+                        metrics = json.loads(record.metrics)
+                    except:
+                        pass
+                
+                groups[group_key].append({
+                    'object': obj,
+                    'record': record,
+                    'metrics': metrics,
+                    'sort_order': obj.sort_order or 0,
+                })
+        
+        # 按 sort_order 排序各组内的对象
+        for key in groups:
+            groups[key].sort(key=lambda x: x.get('sort_order', x['object'].sort_order or 0))
+        
+        # 创建 Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '巡检报告'
+        
+        # 样式定义 - 微软雅黑 14号
+        default_font = Font(name='微软雅黑', size=14)
+        header_font = Font(name='微软雅黑', size=14, bold=True)
+        col_header_font = Font(name='微软雅黑', size=14, bold=True)
+        center_align = Alignment(horizontal='center', vertical='center')
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        green_fill = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
+        yellow_fill = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
+        red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+        
+        # 固定列：位置/对象, 总数, 在线, 离线, 在线率, 备注
+        headers = ['位置/对象', '总数', '在线', '离线', '在线率', '备注']
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=2, column=col, value=header)
+            cell.font = col_header_font
+            cell.alignment = center_align
+            cell.border = thin_border
+        
+        # 表头
+        ws.merge_cells('A1:F1')
+        ws['A1'] = '智慧城管平台'
+        ws['A1'].font = Font(name='微软雅黑', size=14, bold=True)
+        ws['A1'].alignment = center_align
+        
+        # 数据行
+        row = 3
+        for group_name, items in groups.items():
+            for item in items:
+                obj = item['object']
+                metrics = item['metrics']
+                
+                # 获取在线值（从 metrics 中取）
+                online_val = 0
+                for k in ['在线', 'online']:
+                    v = metrics.get(k, '')
+                    if v != '':
+                        try:
+                            online_val = int(float(v))
+                        except:
+                            online_val = 0
+                        break
+                
+                # 总数优先使用 metrics 中的值（如 OCR 识别的总数或计算指标）
+                total = 0
+                for k in ['总数', 'total', 'Total']:
+                    v = metrics.get(k, '')
+                    if v != '':
+                        try:
+                            total = int(float(v))
+                        except:
+                            pass
+                        break
+                if total == 0:
+                    # 回退到"在线"指标对应的 max_value
+                    obj_metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+                    online_metric = None
+                    for m in obj_metrics:
+                        if m.key in ['在线', 'online'] or m.name in ['在线', 'online']:
+                            online_metric = m
+                            break
+                    if online_metric and online_metric.max_value:
+                        total = int(float(online_metric.max_value))
+                    elif obj_metrics:
+                        for m in obj_metrics:
+                            if m.max_value:
+                                total = int(float(m.max_value))
+                                break
+                
+                # 离线值 = 总数 - 在线
+                offline_val = max(0, total - online_val) if total > 0 else None
+                
+                # 在线率：优先使用已有的"在线率"指标值
+                rate = ''
+                rate_val = 0
+                rate_from_metrics = None
+                for k in ['在线率', 'onlinerate']:
+                    v = metrics.get(k, '')
+                    if v != '':
+                        try:
+                            rate_from_metrics = float(v)
+                        except:
+                            pass
+                        break
+                if rate_from_metrics is not None:
+                    rate_val = rate_from_metrics
+                    if 0 < rate_val <= 1:
+                        rate_val = rate_val * 100
+                    rate = f'{rate_val:.2f}%'
+                elif total > 0:
+                    rate_val = online_val / total * 100
+                    rate = f'{rate_val:.2f}%'
+                
+                # 从 dashboard_types.json 读取 online_rate 阈值规则
+                warn_threshold = 80
+                error_threshold = 95
+                for dt in dashboard_types:
+                    if dt.get('category') == obj.device_type:
+                        result_rules = dt.get('result_rules', {})
+                        for rule, outcome in result_rules.items():
+                            rm = re.match(r'^online_rate([><=]+)([\d.]+)$', rule)
+                            if rm:
+                                op, threshold = rm.group(1), float(rm.group(2))
+                                if op == '<':
+                                    error_threshold = threshold
+                                elif op == '<=':
+                                    error_threshold = threshold
+                        break
+                
+                # 写入数据
+                display_name = group_name
+                ws.cell(row=row, column=1, value=display_name).font = default_font
+                ws.cell(row=row, column=1).border = thin_border
+                ws.cell(row=row, column=2, value=total).font = default_font
+                ws.cell(row=row, column=2).alignment = center_align
+                ws.cell(row=row, column=2).border = thin_border
+                ws.cell(row=row, column=3, value=online_val).font = default_font
+                ws.cell(row=row, column=3).alignment = center_align
+                ws.cell(row=row, column=3).border = thin_border
+                ws.cell(row=row, column=4, value=offline_val if offline_val is not None else '').font = default_font
+                ws.cell(row=row, column=4).alignment = center_align
+                ws.cell(row=row, column=4).border = thin_border
+                
+                rate_cell = ws.cell(row=row, column=5, value=rate)
+                rate_cell.font = default_font
+                rate_cell.alignment = center_align
+                rate_cell.border = thin_border
+                if rate and '%' in str(rate):
+                    if rate_val >= error_threshold:
+                        rate_cell.fill = green_fill
+                    elif rate_val >= warn_threshold:
+                        rate_cell.fill = yellow_fill
+                    else:
+                        rate_cell.fill = red_fill
+                
+                ws.cell(row=row, column=6, value='').font = default_font
+                ws.cell(row=row, column=6).border = thin_border
+                row += 1
+        
+        # 设置列宽
+        ws.column_dimensions['A'].width = 18
+        ws.column_dimensions['B'].width = 10
+        ws.column_dimensions['C'].width = 10
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 12
+        ws.column_dimensions['F'].width = 25
+        
+        # 保存到内存
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        filename = f'{report_date} 巡检报告.xlsx'
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    finally:
+        session.close()
+
+
 @main.route('/')
 def index():
     """首页：巡检对象列表"""
     session = SessionLocal()
     try:
-        objects = session.query(InspectionObject).filter_by(status='active').all()
-        # 获取每个对象的最近巡检记录
+        objects = session.query(InspectionObject).filter_by(status='active').order_by(InspectionObject.sort_order, InspectionObject.id).all()
+        # 获取每个对象的最近巡检记录和指标
         object_data = []
+        stats = {'total': len(objects), 'normal': 0, 'warning': 0, 'error': 0, 'no_record': 0}
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
         for obj in objects:
             latest_record = (
                 session.query(InspectionRecord)
@@ -869,9 +1172,52 @@ def index():
                 .order_by(InspectionRecord.timestamp.desc())
                 .first()
             )
+            # 获取今天的巡检记录
+            today_record = (
+                session.query(InspectionRecord)
+                .filter(InspectionRecord.object_id == obj.id,
+                        InspectionRecord.timestamp >= today)
+                .first()
+            )
+            # 获取指标配置
+            metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+            metric_list = [{'key': m.key, 'name': m.name, 'unit': m.unit, 'show_in_chart': m.show_in_chart} for m in metrics]
+            
+            # 解析最新记录的指标值
+            latest_metrics = {}
+            if latest_record and latest_record.metrics:
+                try:
+                    latest_metrics = json.loads(latest_record.metrics)
+                except:
+                    pass
+            
+            # 判断是否跳过位置匹配
+            skip_location = False
+            if obj.device_type:
+                dashboard_types = _load_dashboard_types()
+                for dt in dashboard_types:
+                    if dt.get('category') == obj.device_type and dt.get('skip_location_match'):
+                        skip_location = True
+                        break
+            
+            # 统计状态
+            if not latest_record:
+                stats['no_record'] += 1
+            elif latest_record.result == '正常':
+                stats['normal'] += 1
+            elif latest_record.result == '异常':
+                stats['error'] += 1
+            else:
+                stats['warning'] += 1
+            
             object_data.append({
                 'object': obj,
                 'latest_record': latest_record,
+                'today_record': today_record,
+                'metric_list': metric_list,
+                'latest_metrics': latest_metrics,
+                'skip_location': skip_location,
+                'sort_order': obj.sort_order or 0,
             })
         # 收集所有不重复的 device_type 和 location
         all_types = sorted(set(
@@ -881,7 +1227,8 @@ def index():
             obj.location for obj in objects if obj.location
         ))
         return render_template('index.html', object_data=object_data,
-                               all_device_types=all_types, all_locations=all_locations)
+                               all_device_types=all_types, all_locations=all_locations,
+                               stats=stats)
     finally:
         session.close()
 
@@ -911,9 +1258,16 @@ def object_detail(object_id):
         abnormal_count = sum(1 for r in records if r.result == '异常')
         warn_count = sum(1 for r in records if r.result == '需关注')
 
+        # 按日去重，每日期取最新一条记录（用于趋势图）
+        daily_latest = {}
+        for record in records:
+            day_key = record.timestamp.strftime('%Y-%m-%d')
+            if day_key not in daily_latest:
+                daily_latest[day_key] = record
+
         # 按结果分组，用于图表（跳过周末）
         result_timeline = {}
-        for record in records:
+        for record in daily_latest.values():
             # 跳过周末（周六=5，周日=6）
             if record.timestamp.weekday() >= 5:
                 continue
@@ -1012,7 +1366,7 @@ def objects():
     """巡检对象管理页面"""
     session = SessionLocal()
     try:
-        object_list = session.query(InspectionObject).order_by(InspectionObject.location, InspectionObject.name).all()
+        object_list = session.query(InspectionObject).order_by(InspectionObject.sort_order, InspectionObject.location, InspectionObject.name).all()
         from datetime import timedelta
         for obj in object_list:
             if obj.created_at:
@@ -1183,6 +1537,31 @@ def api_objects_list():
             }
             for o in objects
         ])
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/sort', methods=['POST'])
+def api_objects_sort():
+    """保存巡检对象排序"""
+    data = request.get_json()
+    if not data or 'order' not in data:
+        return jsonify({'error': '请提供排序数据'}), 400
+    
+    session = SessionLocal()
+    try:
+        order = data['order']  # [{id: 1}, {id: 2}, ...]
+        for idx, item in enumerate(order):
+            obj_id = item.get('id')
+            if obj_id:
+                obj = session.query(InspectionObject).get(obj_id)
+                if obj:
+                    obj.sort_order = idx
+        session.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         session.close()
 
@@ -2449,6 +2828,11 @@ def api_save():
             if parsed_metrics:
                 existing_metrics = {m.key: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
                 existing_names = {m.name: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
+                
+                # 获取 calc_config 用于设置 show_chart 和 max_value
+                calc_config = matched_dtype.get('calc_config', {}) if matched_dtype else {}
+                calc_result_name = calc_config.get('result_name', '') if calc_config else ''
+                
                 for key, val in parsed_metrics.items():
                     try:
                         fv = float(val)
@@ -2463,29 +2847,46 @@ def api_save():
                         if sk == key or sk == mapped_key:
                             cn_name = cn
                             break
+                    
+                    # 判断是否为计算字段，获取其 show_chart 和 max_value
+                    is_calc_field = (key == calc_result_name or mapped_key == calc_result_name)
+                    calc_show_chart = calc_config.get('show_chart', True) if is_calc_field and calc_config else True
+                    calc_max_value = calc_config.get('max_value', None) if is_calc_field and calc_config else None
+                    
                     if match_key in existing_metrics:
                         m = existing_metrics[match_key]
-                        new_max = max(fv * 1.5, 100)
-                        if m.unit == 'w':
-                            new_max = max(fv * 1.5, 10000)
-                        if new_max > (m.max_value or 100):
-                            m.max_value = new_max
+                        # 如果是计算字段且配置了 max_value，使用配置值
+                        if is_calc_field and calc_max_value is not None:
+                            m.max_value = calc_max_value
+                        else:
+                            new_max = max(fv * 1.5, 100)
+                            if m.unit == 'w':
+                                new_max = max(fv * 1.5, 10000)
+                            if new_max > (m.max_value or 100):
+                                m.max_value = new_max
+                        # 更新 show_in_chart
+                        if is_calc_field:
+                            m.show_in_chart = calc_show_chart
                         if fv >= 10000 and not m.unit:
                             m.unit = 'w'
-                            m.max_value = max(fv * 1.5, 10000)
+                            if not is_calc_field or calc_max_value is None:
+                                m.max_value = max(fv * 1.5, 10000)
                     elif cn_name and cn_name in existing_names:
                         pass  # 已有同名指标，跳过
                     else:
                         unit = ''
-                        max_val = max(fv * 1.5, 100)
-                        if fv >= 10000:
-                            unit = 'w'
-                            max_val = max(fv * 1.5, 10000)
+                        if is_calc_field and calc_max_value is not None:
+                            max_val = calc_max_value
+                        else:
+                            max_val = max(fv * 1.5, 100)
+                            if fv >= 10000:
+                                unit = 'w'
+                                max_val = max(fv * 1.5, 10000)
                         session.add(ObjectMetric(
                             object_id=obj.id, key=mapped_key, name=cn_name or mapped_key, unit=unit,
-                            max_value=max_val, show_in_chart=True
+                            max_value=max_val, show_in_chart=calc_show_chart
                         ))
-                        logger.info(f'  SAVE: 自动创建指标配置 key={mapped_key} name={cn_name or mapped_key} max_value={max_val}')
+                        logger.info(f'  SAVE: 自动创建指标配置 key={mapped_key} name={cn_name or mapped_key} max_value={max_val} show_chart={calc_show_chart}')
 
             threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, session)
             if threshold_result:

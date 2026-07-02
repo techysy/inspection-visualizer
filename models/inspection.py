@@ -21,6 +21,7 @@ class InspectionObject(Base):
     device_type = Column(String(50))  # 类型：服务器/网络设备/存储/UPS等
     status = Column(String(20), default='active')  # 状态：active/inactive/maintenance
     description = Column(String(255))  # 描述/备注
+    sort_order = Column(Integer, default=0)  # 排序序号
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     inspection_records = relationship('InspectionRecord', back_populates='inspection_object')
@@ -114,6 +115,7 @@ def init_db():
             'device_type': 'VARCHAR(50)',
             'status': 'VARCHAR(20) DEFAULT \'active\'',
             'description': 'VARCHAR(255)',
+            'sort_order': 'INTEGER DEFAULT 0',
             'created_at': 'DATETIME',
         },
         'inspection_records': {

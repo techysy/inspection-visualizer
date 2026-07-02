@@ -219,79 +219,95 @@
             <!-- 计算百分比 -->
             <div id="calc-percentage" class="calc-section" style="display:none">
                 <div class="calc-percentage-panel">
-                    <div class="row">
+                    <div class="row mb-2">
                         <div class="col-md-6">
-                            <div class="mb-2">
-                                <label class="form-label" style="font-size:0.8rem">结果名称</label>
-                                <input type="text" class="form-control form-control-sm" id="calc-pct-name" placeholder="如: 在线率">
-                            </div>
+                            <label class="form-label" style="font-size:0.85rem">结果名称</label>
+                            <input type="text" class="form-control form-control-sm" id="calc-pct-name" placeholder="如: 在线率">
                         </div>
                         <div class="col-md-6">
-                            <div class="mb-2">
-                                <label class="form-label" style="font-size:0.8rem">小数位数</label>
-                                <select class="form-control form-control-sm" id="calc-pct-decimal">
-                                    <option value="0">0位</option>
-                                    <option value="1">1位</option>
-                                    <option value="2" selected>2位</option>
-                                    <option value="3">3位</option>
-                                </select>
-                            </div>
+                            <label class="form-label" style="font-size:0.85rem">图表最大值 <small class="text-muted">（Y轴上限）</small></label>
+                            <input type="number" class="form-control form-control-sm" id="calc-pct-max" placeholder="如: 100">
                         </div>
                     </div>
-                    <div class="row">
+                    <div class="row mb-2">
                         <div class="col-md-6">
-                            <div class="mb-2">
-                                <label class="form-label" style="font-size:0.8rem">分子字段</label>
-                                <select class="form-control form-control-sm" id="calc-pct-numerator">
+                            <label class="form-label" style="font-size:0.85rem">小数位数</label>
+                            <select class="form-control form-control-sm" id="calc-pct-decimal">
+                                <option value="0">0位</option>
+                                <option value="1">1位</option>
+                                <option value="2" selected>2位</option>
+                                <option value="3">3位</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" style="font-size:0.85rem">输出格式</label>
+                            <select class="form-control form-control-sm" id="calc-pct-format">
+                                <option value="decimal">小数 (0.85)</option>
+                                <option value="percent">百分比 (85%)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label" style="font-size:0.85rem">分子字段</label>
+                            <select class="form-control form-control-sm" id="calc-pct-numerator">
+                                <option value="">选择字段</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" style="font-size:0.85rem">分母字段</label>
+                            <div class="input-group input-group-sm">
+                                <select class="form-control" id="calc-pct-denominator">
                                     <option value="">选择字段</option>
                                 </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-2">
-                                <label class="form-label" style="font-size:0.8rem">分母字段</label>
-                                <div class="input-group input-group-sm">
-                                    <select class="form-control" id="calc-pct-denominator">
-                                        <option value="">选择字段</option>
-                                    </select>
-                                    <button class="btn btn-outline-secondary" type="button" id="calc-pct-denom-toggle" style="font-size:0.75rem">固定值</button>
-                                </div>
+                                <button class="btn btn-outline-secondary" type="button" id="calc-pct-denom-toggle" style="font-size:0.75rem">固定值</button>
                             </div>
                         </div>
                     </div>
-                    <div id="calc-pct-fixed-group" style="display:none">
-                        <div class="mb-2">
-                            <label class="form-label" style="font-size:0.8rem">分母固定值</label>
-                            <input type="number" class="form-control form-control-sm" id="calc-pct-fixed-value" placeholder="如: 100">
-                        </div>
+                    <div id="calc-pct-fixed-group" style="display:none" class="mb-2">
+                        <label class="form-label" style="font-size:0.85rem">分母固定值</label>
+                        <input type="number" class="form-control form-control-sm" id="calc-pct-fixed-value" placeholder="如: 100">
                     </div>
-                    <div class="mb-0">
-                        <label class="form-label" style="font-size:0.8rem">输出格式</label>
-                        <select class="form-control form-control-sm" id="calc-pct-format">
-                            <option value="decimal">小数 (0.85)</option>
-                            <option value="percent">百分比 (85%)</option>
-                        </select>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="calc-pct-show-chart" checked>
+                        <label class="form-check-label" for="calc-pct-show-chart" style="font-size:0.85rem">计算结果在图表中显示</label>
                     </div>
                 </div>
             </div>
             
             <!-- 求和 -->
             <div id="calc-sum" class="calc-section" style="display:none">
-                <div class="mb-3">
-                    <label class="form-label">结果名称</label>
-                    <input type="text" class="form-control form-control-sm" id="calc-sum-name" placeholder="如: 总数">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">结果名称</label>
+                        <input type="text" class="form-control form-control-sm" id="calc-sum-name" placeholder="如: 在线">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">图表最大值 <small class="text-muted">（Y轴上限）</small></label>
+                        <input type="number" class="form-control form-control-sm" id="calc-sum-max" placeholder="如: 100">
+                    </div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">求和字段 <small class="text-muted">（勾选需要相加的字段）</small></label>
                     <div id="calc-sum-fields" class="calc-fields-checkboxes"></div>
                 </div>
+                <div class="form-check mt-2 mb-3">
+                    <input class="form-check-input" type="checkbox" id="calc-sum-show-chart" checked>
+                    <label class="form-check-label" for="calc-sum-show-chart" style="font-size:0.85rem">计算结果在图表中显示</label>
+                </div>
             </div>
             
             <!-- 差值 -->
             <div id="calc-difference" class="calc-section" style="display:none">
-                <div class="mb-3">
-                    <label class="form-label">结果名称</label>
-                    <input type="text" class="form-control form-control-sm" id="calc-diff-name" placeholder="如: 变化量">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">结果名称</label>
+                        <input type="text" class="form-control form-control-sm" id="calc-diff-name" placeholder="如: 变化量">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">图表最大值 <small class="text-muted">（Y轴上限）</small></label>
+                        <input type="number" class="form-control form-control-sm" id="calc-diff-max" placeholder="如: 100">
+                    </div>
                 </div>
                 <div class="row">
                     <div class="col-md-6">
@@ -311,7 +327,12 @@
                         </div>
                     </div>
                 </div>
+                <div class="form-check mt-2 mb-3">
+                    <input class="form-check-input" type="checkbox" id="calc-diff-show-chart" checked>
+                    <label class="form-check-label" for="calc-diff-show-chart" style="font-size:0.85rem">计算结果在图表中显示</label>
+                </div>
             </div>
+            <hr class="my-3">
             <div class="mb-3">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" id="modal-type-extra-rate">
@@ -564,6 +585,8 @@
                 document.getElementById('calc-pct-name').value = calcConfig.result_name || '';
                 document.getElementById('calc-pct-decimal').value = calcConfig.decimal_places || 2;
                 document.getElementById('calc-pct-format').value = calcConfig.format || 'decimal';
+                document.getElementById('calc-pct-show-chart').checked = calcConfig.show_chart !== false;
+                document.getElementById('calc-pct-max').value = calcConfig.max_value || '';
                 if (calcConfig.denominator_type === 'fixed') {
                     denomToggle.textContent = '字段';
                     denomSelect.style.display = 'none';
@@ -578,6 +601,8 @@
                 document.getElementById('calc-pct-numerator').value = calcConfig.numerator || '';
             } else if (calcConfig.type === 'sum') {
                 document.getElementById('calc-sum-name').value = calcConfig.result_name || '';
+                document.getElementById('calc-sum-show-chart').checked = calcConfig.show_chart !== false;
+                document.getElementById('calc-sum-max').value = calcConfig.max_value || '';
                 // 等待字段选项更新后勾选
                 setTimeout(() => {
                     (calcConfig.fields || []).forEach(f => {
@@ -589,6 +614,8 @@
                 document.getElementById('calc-diff-name').value = calcConfig.result_name || '';
                 document.getElementById('calc-diff-minuend').value = calcConfig.minuend || '';
                 document.getElementById('calc-diff-subtrahend').value = calcConfig.subtrahend || '';
+                document.getElementById('calc-diff-show-chart').checked = calcConfig.show_chart !== false;
+                document.getElementById('calc-diff-max').value = calcConfig.max_value || '';
             }
         } else {
             calcTypeSelect.value = 'custom';
@@ -677,10 +704,16 @@
         document.getElementById('calc-pct-fixed-value').value = '';
         document.getElementById('calc-pct-decimal').value = '2';
         document.getElementById('calc-pct-format').value = 'decimal';
+        document.getElementById('calc-pct-show-chart').checked = true;
+        document.getElementById('calc-pct-max').value = '';
         document.getElementById('calc-sum-name').value = '';
+        document.getElementById('calc-sum-show-chart').checked = true;
+        document.getElementById('calc-sum-max').value = '';
         document.getElementById('calc-diff-name').value = '';
         document.getElementById('calc-diff-minuend').value = '';
         document.getElementById('calc-diff-subtrahend').value = '';
+        document.getElementById('calc-diff-show-chart').checked = true;
+        document.getElementById('calc-diff-max').value = '';
         
         document.getElementById('modal-advanced-fields').style.display = 'none';
         document.getElementById('modal-create-hint').style.display = '';
@@ -906,7 +939,9 @@
                 denominator_type: useFixedDenom ? 'field' : 'fixed',
                 denominator: useFixedDenom ? denominator : fixedValue,
                 decimal_places: parseInt(decimal),
-                format: format
+                format: format,
+                show_chart: document.getElementById('calc-pct-show-chart').checked,
+                max_value: parseFloat(document.getElementById('calc-pct-max').value) || null
             };
         }
         
@@ -914,7 +949,13 @@
             const resultName = document.getElementById('calc-sum-name').value;
             const fields = [...document.querySelectorAll('#calc-sum-fields input:checked')].map(i => i.value);
             if (!resultName || fields.length < 2) return null;
-            return { type: 'sum', result_name: resultName, fields: fields };
+            return { 
+                type: 'sum', 
+                result_name: resultName, 
+                fields: fields,
+                show_chart: document.getElementById('calc-sum-show-chart').checked,
+                max_value: parseFloat(document.getElementById('calc-sum-max').value) || null
+            };
         }
         
         if (type === 'difference') {
@@ -922,7 +963,14 @@
             const minuend = document.getElementById('calc-diff-minuend').value;
             const subtrahend = document.getElementById('calc-diff-subtrahend').value;
             if (!resultName || !minuend || !subtrahend) return null;
-            return { type: 'difference', result_name: resultName, minuend: minuend, subtrahend: subtrahend };
+            return { 
+                type: 'difference', 
+                result_name: resultName, 
+                minuend: minuend, 
+                subtrahend: subtrahend,
+                show_chart: document.getElementById('calc-diff-show-chart').checked,
+                max_value: parseFloat(document.getElementById('calc-diff-max').value) || null
+            };
         }
         
         return null;
@@ -1383,29 +1431,21 @@
 .card-summary::-webkit-details-marker { display: none; }
 .card-summary::marker { display: none; content: ''; }
 .calc-percentage-panel {
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.75rem;
+    padding: 0;
 }
 .calc-fields-checkboxes {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.6rem;
+    padding: 0.3rem 0;
 }
 .calc-fields-checkboxes .form-check {
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.4rem 0.6rem;
     margin: 0;
-    font-size: 0.82rem;
-}
-.calc-fields-checkboxes .form-check:hover {
-    border-color: var(--accent);
+    font-size: 0.85rem;
 }
 .calc-fields-checkboxes .form-check-input:checked + .form-check-label {
     color: var(--accent);
+    font-weight: 500;
 }
 </style>
 {% endblock %}
