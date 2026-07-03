@@ -720,6 +720,11 @@ h5.card-title::before {
     padding-top: 0.85rem;
     border-top: 1px solid var(--border);
 }
+.store-card-actions .store-action-btn,
+.store-card-actions a.store-action-btn {
+    flex: 1;
+    justify-content: center;
+}
 .store-action-btn {
     display: inline-flex;
     align-items: center;

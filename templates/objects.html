@@ -6,6 +6,7 @@
 <div class="mb-5">
     <h1 class="mb-2">巡检对象管理</h1>
     <p class="text-muted">管理巡检对象，截图识别时自动匹配</p>
+    <button onclick="openDataOps()" style="margin-top:0.5rem;padding:0.35rem 0.8rem;font-size:0.78rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;">数据维护</button>
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -26,11 +27,18 @@
         </svg>
     </div>
     <form method="POST" action="{{ url_for('main.object_add') }}" class="store-add-form">
-        <input type="text" class="store-input" name="name" placeholder="名称" required style="flex:1 1 120px;min-width:0;">
-        <input type="text" class="store-input" name="location" placeholder="位置" style="flex:1 1 80px;min-width:0;">
-        <select class="store-input" name="device_type" id="obj-add-category" style="flex:1 1 80px;min-width:0;">
-            <option value="">分类</option>
-        </select>
+        <div class="autocomplete-wrapper" style="flex:1 1 120px;min-width:0;position:relative;">
+            <input type="text" class="store-input" name="name" id="obj-add-name" placeholder="名称" required style="width:100%;">
+            <div class="autocomplete-dropdown" id="name-dropdown" style="display:none;"></div>
+        </div>
+        <div class="autocomplete-wrapper" style="flex:1 1 80px;min-width:0;position:relative;">
+            <input type="text" class="store-input" name="location" id="obj-add-location" placeholder="位置" style="width:100%;">
+            <div class="autocomplete-dropdown" id="location-dropdown" style="display:none;"></div>
+        </div>
+        <div class="autocomplete-wrapper" style="flex:1 1 80px;min-width:0;position:relative;">
+            <input type="text" class="store-input" name="device_type" id="obj-add-device-type" placeholder="分类" style="width:100%;">
+            <div class="autocomplete-dropdown" id="device-type-dropdown" style="display:none;"></div>
+        </div>
         <input type="text" class="store-input" name="description" placeholder="描述" style="flex:1 1 100px;min-width:0;">
         <button type="submit" class="store-add-btn">添加</button>
     </form>
@@ -49,14 +57,14 @@
 {% endfor %}
 
 {% for name, items in grouped.items() %}
-<div class="object-group">
+<div class="object-group" data-group="{{ name }}">
     <div class="object-group-title">
         <span>{{ name }}</span>
         <span class="object-group-count">{{ items|length }}</span>
     </div>
     <div class="store-grid">
     {% for obj in items %}
-    <div class="store-card" draggable="true" data-id="{{ obj.id }}" style="cursor:grab;position:relative;">
+    <div class="store-card" draggable="true" data-id="{{ obj.id }}" data-name="{{ obj.name }}" data-location="{{ obj.location or '' }}" data-device-type="{{ obj.device_type or '' }}" style="cursor:grab;position:relative;">
         <div class="drag-handle" style="position:absolute;top:0;left:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:grab;color:var(--text-muted);font-size:11px;opacity:0.3;transition:opacity 0.15s;" title="拖动排序">⋮⋮</div>
         <div class="store-card-header">
             <div class="store-avatar" style="{% if obj.device_type == '服务器' %}background:linear-gradient(135deg, rgba(129,140,248,0.15), rgba(99,102,241,0.1));color:#6366f1;{% elif obj.device_type == '网络设备' %}background:linear-gradient(135deg, rgba(34,211,238,0.15), rgba(6,182,212,0.1));color:#06b6d4;{% elif obj.device_type == '存储' %}background:linear-gradient(135deg, rgba(52,211,153,0.15), rgba(16,185,129,0.1));color:#10b981;{% elif obj.device_type == 'UPS' %}background:linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1));color:#f59e0b;{% elif obj.device_type == '空调' %}background:linear-gradient(135deg, rgba(56,189,248,0.15), rgba(14,165,233,0.1));color:#0ea5e9;{% elif obj.device_type == '车辆' %}background:linear-gradient(135deg, rgba(244,114,182,0.15), rgba(236,72,153,0.1));color:#ec4899;{% elif obj.device_type == '工牌' %}background:linear-gradient(135deg, rgba(168,85,247,0.15), rgba(139,92,246,0.1));color:#a855f7;{% else %}background:linear-gradient(135deg, rgba(107,114,128,0.15), rgba(75,85,99,0.1));color:#6b7280;{% endif %}">{{ obj.name[0] }}</div>
@@ -182,43 +190,348 @@
 </div>
 {% endif %}
 
+<div class="modal fade" id="dataOpsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="background: var(--bg-modal); border: 1px solid var(--border); border-radius: 16px;">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border); padding: 1.25rem 1.5rem;">
+                <h5 class="modal-title" style="color: var(--text-heading); font-weight: 600;">数据维护</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="padding: 1.5rem;">
+                <div style="margin-bottom: 1rem;">
+                    <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem; font-weight: 600;">回填</label>
+                    <div>
+                        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;margin-bottom:0.5rem;">
+                            <input type="checkbox" class="dataOpsCb" value="backfill_total" checked style="cursor:pointer;"> 补全缺失的「总数」（从已有完整记录推算）
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;">
+                            <input type="checkbox" class="dataOpsCb" value="backfill_offline" checked style="cursor:pointer;"> 补全缺失的「离线」（总数 - 在线）
+                        </label>
+                    </div>
+                </div>
+                <div style="border-top:1px solid var(--border);padding-top:1rem;margin-top:0.5rem;">
+                    <label class="form-label" style="color: var(--danger); font-size: 0.85rem; font-weight: 600;">清理</label>
+                    <div>
+                        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;margin-bottom:0.5rem;">
+                            <input type="checkbox" class="dataOpsCb" value="clean_total" style="cursor:pointer;"> 清除所有记录中的「总数」
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;">
+                            <input type="checkbox" class="dataOpsCb" value="clean_offline" style="cursor:pointer;"> 清除所有记录中的「离线」
+                        </label>
+                    </div>
+                </div>
+                <div style="border-top:1px solid var(--border);padding-top:1rem;margin-top:0.5rem;">
+                    <label class="form-label" style="color: var(--accent); font-size: 0.85rem; font-weight: 600;">计算类别补全</label>
+                    <div id="calcConfigsList" style="font-size:0.82rem;color:var(--text-muted);">加载中...</div>
+                </div>
+                <div id="dataOpsResult" style="display:none;padding:0.75rem 1rem;border-radius:10px;font-size:0.85rem;margin-top:1rem;"></div>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid var(--border); padding: 1rem 1.5rem;">
+                <button type="button" class="btn" data-bs-dismiss="modal" style="background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 10px; padding: 0.5rem 1.25rem;">取消</button>
+                <button id="dataOpsExecBtn" onclick="execDataOps()" style="padding: 0.5rem 1.5rem;border-radius:10px;border:none;background:var(--primary);color:#fff;cursor:pointer;font-size:0.88rem;font-weight:500;">执行</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
-(function() {
-    fetch('/api/dashboard-types/categories').then(function(r) { return r.json(); }).then(function(cats) {
-        function fillSelect(sel, current) {
-            cats.forEach(function(c) {
-                var opt = document.createElement('option');
-                opt.value = c; opt.textContent = c;
-                if (c === current) opt.selected = true;
-                sel.appendChild(opt);
+function openDataOps() {
+    var modal = new bootstrap.Modal(document.getElementById('dataOpsModal'));
+    document.getElementById('dataOpsResult').style.display = 'none';
+    document.querySelectorAll('.dataOpsCb').forEach(function(cb) { cb.checked = cb.hasAttribute('checked') || cb.value.startsWith('backfill_'); });
+    document.querySelectorAll('.calcConfigCb').forEach(function(cb) { cb.checked = false; });
+    loadCalcConfigs();
+    modal.show();
+}
+function closeDataOps() {
+    var modal = bootstrap.Modal.getInstance(document.getElementById('dataOpsModal'));
+    if (modal) modal.hide();
+}
+function execDataOps() {
+    var selected = [];
+    document.querySelectorAll('.dataOpsCb:checked').forEach(function(cb) { selected.push(cb.value); });
+    var calcSelected = [];
+    document.querySelectorAll('.calcConfigCb:checked').forEach(function(cb) {
+        var idx = parseInt(cb.getAttribute('data-index'));
+        if (calcConfigsData[idx]) calcSelected.push(calcConfigsData[idx]);
+    });
+    if (selected.length === 0 && calcSelected.length === 0) { alert('请至少选择一项操作'); return; }
+    var doBackfill = selected.some(function(s) { return s.startsWith('backfill_'); });
+    var doClean = selected.some(function(s) { return s.startsWith('clean_'); });
+    var resultEl = document.getElementById('dataOpsResult');
+    var execBtn = document.getElementById('dataOpsExecBtn');
+    execBtn.disabled = true; execBtn.textContent = '执行中...';
+    resultEl.style.display = 'block';
+    resultEl.style.background = 'var(--primary-soft)';
+    resultEl.style.color = 'var(--accent)';
+    resultEl.textContent = '正在处理...';
+
+    var steps = [];
+    if (doClean) {
+        steps.push(function() {
+            return fetch('/api/records/cleanup', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) return '清理完成，处理 ' + d.cleaned + ' 条';
+                throw new Error(d.error || '清理失败');
             });
-            var addOpt = document.createElement('option');
-            addOpt.value = '__new__'; addOpt.textContent = '+ 新建分类...';
-            sel.appendChild(addOpt);
-            sel.addEventListener('change', function() {
-                if (this.value === '__new__') {
-                    var name = prompt('请输入新分类名称：');
-                    if (name && name.trim()) {
-                        var opt = document.createElement('option');
-                        opt.value = name.trim(); opt.textContent = name.trim();
-                        sel.insertBefore(opt, sel.lastElementChild);
-                        sel.value = name.trim();
-                    } else {
-                        this.value = current || '';
-                    }
-                }
-            });
-        }
-        var addSel = document.getElementById('obj-add-category');
-        if (addSel) fillSelect(addSel, '');
-        document.querySelectorAll('[id^="obj-edit-category-"]').forEach(function(sel) {
-            fillSelect(sel, sel.getAttribute('data-current') || '');
         });
-    }).catch(function() {});
-})();
+    }
+    if (doBackfill) {
+        steps.push(function() {
+            return fetch('/api/records/backfill', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) return '回填完成，更新 ' + d.updated + ' 条';
+                throw new Error(d.error || '回填失败');
+            });
+        });
+    }
+    if (calcSelected.length > 0) {
+        steps.push(function() {
+            return fetch('/api/records/compute', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({configs: calcSelected})
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) return '计算完成，更新 ' + d.updated + ' 条' + (d.details ? '（' + d.details.join('，') + '）' : '');
+                throw new Error(d.error || '计算失败');
+            });
+        });
+    }
+
+    var chain = Promise.resolve();
+    var results = [];
+    steps.forEach(function(fn) {
+        chain = chain.then(fn).then(function(msg) { results.push(msg); });
+    });
+    chain.then(function() {
+        resultEl.style.background = 'rgba(34,197,94,0.1)';
+        resultEl.style.color = '#22c55e';
+        resultEl.textContent = results.join('；');
+        execBtn.disabled = false; execBtn.textContent = '执行';
+    }).catch(function(e) {
+        resultEl.style.background = 'rgba(239,68,68,0.1)';
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = '出错: ' + e.message;
+        execBtn.disabled = false; execBtn.textContent = '执行';
+    });
+}
+var calcConfigsData = [];
+function loadCalcConfigs() {
+    var container = document.getElementById('calcConfigsList');
+    fetch('/api/dashboard-types/calc-configs').then(function(r) { return r.json(); }).then(function(configs) {
+        calcConfigsData = configs;
+        if (configs.length === 0) {
+            container.innerHTML = '<span style="color:var(--text-faint);">暂无计算配置，请在仪表盘类型中配置</span>';
+            return;
+        }
+        var typeMap = {};
+        configs.forEach(function(c) {
+            if (!typeMap[c.type_name]) typeMap[c.type_name] = [];
+            typeMap[c.type_name].push(c);
+        });
+        var html = '';
+        Object.keys(typeMap).forEach(function(typeName) {
+            html += '<div style="margin-bottom:0.5rem;">' +
+                '<div style="font-size:0.78rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.3rem;">' + escHtml(typeName) + '</div>';
+            typeMap[typeName].forEach(function(c) {
+                var desc = '';
+                var typeLabel = '';
+                if (c.calc_type === 'sum') {
+                    typeLabel = '求和';
+                    desc = (c.fields || []).join(' + ');
+                } else if (c.calc_type === 'percentage') {
+                    typeLabel = '百分比';
+                    var denDesc = c.denominator_type === 'fixed' ? '固定值' : (c.denominator || '?');
+                    desc = (c.numerator || '?') + ' ÷ ' + denDesc;
+                    if (c.format === 'percent') desc += ' × 100%';
+                } else if (c.calc_type === 'difference') {
+                    typeLabel = '差值';
+                    var minDesc = c.minuend_type === 'fixed' ? '固定值' + (c.minuend_fixed || '') : (c.minuend || '?');
+                    desc = minDesc + ' − ' + (c.subtrahend || '?');
+                } else if (c.calc_type === 'custom') {
+                    typeLabel = '自定义';
+                    desc = (c.formula || '?') + ' [' + (c.fields || []).join(', ') + ']';
+                } else {
+                    typeLabel = c.calc_type;
+                    desc = (c.fields || []).join(', ');
+                }
+                html += '<label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.82rem;color:var(--text);cursor:pointer;margin-bottom:0.3rem;padding:0.3rem 0.5rem;border-radius:6px;transition:background 0.15s;" ' +
+                    'onmouseover="this.style.background=\'var(--primary-soft)\'" onmouseout="this.style.background=\'transparent\'">' +
+                    '<input type="checkbox" class="calcConfigCb" data-index="' + calcConfigsData.indexOf(c) + '" style="cursor:pointer;margin-top:0.15rem;">' +
+                    '<span>' + escHtml(c.result_name) + ' <span style="color:var(--text-muted);font-size:0.75rem;">(' + typeLabel + ': ' + escHtml(desc) + ')</span></span>' +
+                    '</label>';
+            });
+            html += '</div>';
+        });
+        container.innerHTML = html;
+    }).catch(function() {
+        container.innerHTML = '<span style="color:var(--danger);">加载计算配置失败</span>';
+    });
+}
+function execCalcConfigs() {
+    var selected = [];
+    document.querySelectorAll('.calcConfigCb:checked').forEach(function(cb) {
+        var idx = parseInt(cb.getAttribute('data-index'));
+        if (calcConfigsData[idx]) selected.push(calcConfigsData[idx]);
+    });
+    if (selected.length === 0) { alert('请至少选择一项计算'); return; }
+    var resultEl = document.getElementById('dataOpsResult');
+    var execBtn = document.getElementById('dataOpsExecBtn');
+    execBtn.disabled = true; execBtn.textContent = '执行中...';
+    resultEl.style.display = 'block';
+    resultEl.style.background = 'var(--primary-soft)';
+    resultEl.style.color = 'var(--accent)';
+    resultEl.textContent = '正在计算...';
+
+    fetch('/api/records/compute', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({configs: selected})
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+            resultEl.style.background = 'rgba(34,197,94,0.1)';
+            resultEl.style.color = '#22c55e';
+            resultEl.textContent = '计算完成，共更新 ' + d.updated + ' 条' + (d.details ? '（' + d.details.join('，') + '）' : '');
+        } else {
+            throw new Error(d.error || '计算失败');
+        }
+        execBtn.disabled = false; execBtn.textContent = '执行';
+    }).catch(function(e) {
+        resultEl.style.background = 'rgba(239,68,68,0.1)';
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = '出错: ' + e.message;
+        execBtn.disabled = false; execBtn.textContent = '执行';
+    });
+}
+var autocompleteState = {
+    name: { timer: null, selectedIndex: -1, items: [] },
+    location: { timer: null, selectedIndex: -1, items: [] },
+    device_type: { timer: null, selectedIndex: -1, items: [] }
+};
+
+function setupAutocomplete(inputId, dropdownId, field) {
+    var input = document.getElementById(inputId);
+    var dropdown = document.getElementById(dropdownId);
+    if (!input || !dropdown) return;
+    
+    input.addEventListener('input', function() {
+        var query = this.value.trim();
+        var state = autocompleteState[field];
+        
+        clearTimeout(state.timer);
+        
+        if (query.length < 1) {
+            dropdown.style.display = 'none';
+            return;
+        }
+        
+        state.timer = setTimeout(function() {
+            fetch('/api/objects/suggestions?q=' + encodeURIComponent(query) + '&field=' + field)
+                .then(function(r) { return r.json(); })
+                .then(function(items) {
+                    state.items = items;
+                    state.selectedIndex = -1;
+                    
+                    if (items.length === 0) {
+                        dropdown.style.display = 'none';
+                        return;
+                    }
+                    
+                    var html = '';
+                    items.forEach(function(item, index) {
+                        html += '<div class="autocomplete-item" data-index="' + index + '">' + escHtml(item) + '</div>';
+                    });
+                    
+                    dropdown.innerHTML = html;
+                    dropdown.style.display = 'block';
+                    
+                    // 添加点击事件
+                    dropdown.querySelectorAll('.autocomplete-item').forEach(function(item) {
+                        item.addEventListener('click', function() {
+                            var idx = parseInt(this.getAttribute('data-index'));
+                            input.value = state.items[idx];
+                            dropdown.style.display = 'none';
+                        });
+                    });
+                });
+        }, 200);
+    });
+    
+    input.addEventListener('keydown', function(e) {
+        var state = autocompleteState[field];
+        var items = dropdown.querySelectorAll('.autocomplete-item');
+        
+        if (dropdown.style.display === 'none' || items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            state.selectedIndex = Math.min(state.selectedIndex + 1, items.length - 1);
+            updateSelection(items, state.selectedIndex);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            state.selectedIndex = Math.max(state.selectedIndex - 1, -1);
+            updateSelection(items, state.selectedIndex);
+        } else if (e.key === 'Enter') {
+            if (state.selectedIndex >= 0) {
+                e.preventDefault();
+                input.value = state.items[state.selectedIndex];
+                dropdown.style.display = 'none';
+            }
+        } else if (e.key === 'Escape') {
+            dropdown.style.display = 'none';
+        }
+    });
+    
+    input.addEventListener('blur', function() {
+        setTimeout(function() {
+            dropdown.style.display = 'none';
+        }, 200);
+    });
+}
+
+function updateSelection(items, selectedIndex) {
+    items.forEach(function(item, index) {
+        if (index === selectedIndex) {
+            item.classList.add('selected');
+            item.scrollIntoView({ block: 'nearest' });
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setupAutocomplete('obj-add-name', 'name-dropdown', 'name');
+    setupAutocomplete('obj-add-location', 'location-dropdown', 'location');
+    setupAutocomplete('obj-add-device-type', 'device-type-dropdown', 'device_type');
+
+    var nameInput = document.getElementById('obj-add-name');
+    var locInput = document.getElementById('obj-add-location');
+    var typeInput = document.getElementById('obj-add-device-type');
+    [nameInput, locInput, typeInput].forEach(function(el) {
+        if (el) el.addEventListener('input', filterObjects);
+    });
+});
+
+function filterObjects() {
+    var nameQ = (document.getElementById('obj-add-name').value || '').trim().toLowerCase();
+    var locQ = (document.getElementById('obj-add-location').value || '').trim().toLowerCase();
+    var typeQ = (document.getElementById('obj-add-device-type').value || '').trim().toLowerCase();
+    var cards = document.querySelectorAll('.store-card[data-name]');
+    var hasFilter = nameQ || locQ || typeQ;
+    cards.forEach(function(card) {
+        if (!hasFilter) { card.style.display = ''; return; }
+        var matchName = !nameQ || (card.getAttribute('data-name') || '').toLowerCase().indexOf(nameQ) >= 0;
+        var matchLoc = !locQ || (card.getAttribute('data-location') || '').toLowerCase().indexOf(locQ) >= 0;
+        var matchType = !typeQ || (card.getAttribute('data-device-type') || '').toLowerCase().indexOf(typeQ) >= 0;
+        card.style.display = (matchName && matchLoc && matchType) ? '' : 'none';
+    });
+    document.querySelectorAll('.object-group[data-group]').forEach(function(group) {
+        var visCards = group.querySelectorAll('.store-card[data-name]:not([style*="display: none"])');
+        group.style.display = visCards.length === 0 && hasFilter ? 'none' : '';
+    });
+}
 
 function toggleMetrics(objectId) {
     var panel = document.getElementById('metrics-panel-' + objectId);
@@ -335,22 +648,7 @@ function saveThresholdConfig(objectId) {
         });
 }
 
-function showConfirm(message) {
-    return new Promise(function(resolve) {
-        var mask = document.createElement('div');
-        mask.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;';
-        mask.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:1.5rem;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.18);">' +
-            '<p style="margin:0 0 1.2rem;color:var(--text-primary);font-size:0.95rem;line-height:1.5;">' + message + '</p>' +
-            '<div style="display:flex;gap:0.75rem;justify-content:flex-end;">' +
-            '<button id="cfm-cancel" style="padding:0.5rem 1.25rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;font-size:0.88rem;">取消</button>' +
-            '<button id="cfm-ok" style="padding:0.5rem 1.25rem;border-radius:10px;border:none;background:var(--primary);color:#fff;cursor:pointer;font-size:0.88rem;">确定</button>' +
-            '</div></div>';
-        document.body.appendChild(mask);
-        mask.querySelector('#cfm-cancel').onclick = function() { mask.remove(); resolve(false); };
-        mask.querySelector('#cfm-ok').onclick = function() { mask.remove(); resolve(true); };
-        mask.onclick = function(e) { if (e.target === mask) { mask.remove(); resolve(false); } };
-    });
-}
+// showConfirm 使用 base.html 中定义的版本
 
 function deleteMetric(objectId, metricId) {
     showConfirm('确定删除该指标？删除后将同步到仪表盘类型。').then(function(ok) {
@@ -505,6 +803,47 @@ document.addEventListener('DOMContentLoaded', function() {
 .drag-handle:hover {
     opacity: 1 !important;
     color: var(--accent) !important;
+}
+.autocomplete-wrapper {
+    position: relative;
+}
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 2px;
+}
+.autocomplete-item {
+    padding: 0.5rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+}
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+.autocomplete-item:hover {
+    background: var(--primary-soft);
+    color: var(--accent);
+}
+.autocomplete-item.selected {
+    background: var(--primary-soft);
+    color: var(--accent);
+}
+.autocomplete-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 0.4rem 0.8rem;
+    font-style: italic;
 }
 </style>
 <script>

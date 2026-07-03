@@ -3,6 +3,7 @@ import re
 import base64
 import tempfile
 import logging
+import logging.handlers
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
@@ -12,11 +13,19 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector, ObjectMetric, DailyListRecord
 
+log_dir = Path(__file__).parent / 'log'
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / 'app.log'
+log_handler = logging.handlers.TimedRotatingFileHandler(
+    log_file, when='midnight', interval=1, backupCount=30, encoding='utf-8'
+)
+log_handler.suffix = '%Y-%m-%d'
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(Path(__file__).parent / 'app.log', encoding='utf-8'),
+        log_handler,
         logging.StreamHandler()
     ]
 )
@@ -250,38 +259,69 @@ def _parse_status_to_metrics(status_detail):
 
 
 def _check_metrics_thresholds(metrics, object_id, session):
-    """根据指标阈值配置判断巡检结果"""
+    """根据指标阈值配置判断巡检结果，优先用 ObjectMetric 阈值，无则回退到 dashboard_types.json result_rules"""
     metric_configs = session.query(ObjectMetric).filter_by(object_id=object_id).all()
-    if not metric_configs:
-        return None
     
     worst_result = '正常'
     has_threshold = False
+    
     for mc in metric_configs:
-        if mc.error_threshold is None and mc.warn_threshold is None:
-            continue
-        
-        has_threshold = True
-        
-        # 从 metrics dict 中查找值（按 name 或 key）
         val_str = metrics.get(mc.name) or metrics.get(mc.key)
         if val_str is None:
             continue
-        
-        # 提取数值
         val_match = re.search(r'([\d.]+)', str(val_str))
         if not val_match:
             continue
         val = float(val_match.group(1))
         
-        is_gt = mc.threshold_direction == 'gt'
+        err_thr = mc.error_threshold
+        warn_thr = mc.warn_threshold
+        direction = mc.threshold_direction or 'lt'
         
-        if mc.error_threshold is not None:
-            if (is_gt and val > mc.error_threshold) or (not is_gt and val < mc.error_threshold):
+        # 若 ObjectMetric 未配置阈值，从 dashboard_types.json result_rules 回退
+        if err_thr is None and warn_thr is None:
+            obj = session.query(InspectionObject).get(object_id)
+            if obj and obj.device_type:
+                dashboard_types = _load_dashboard_types()
+                dt = next((d for d in dashboard_types if d.get('category') == obj.device_type), None)
+                if dt:
+                    result_rules = dt.get('result_rules', {})
+                    mc_key = mc.key
+                    # 从 result_rules 中提取该指标的阈值（如 online_rate<97=异常, online_rate<100=需关注）
+                    # 支持中英文 key 匹配（在线率 ↔ online_rate）
+                    _key_aliases = {'在线率': 'online_rate', '在线': 'online', '离线': 'offline'}
+                    _reverse_aliases = {v: k for k, v in _key_aliases.items()}
+                    match_keys = {mc_key, _key_aliases.get(mc_key, ''), _reverse_aliases.get(mc_key, '')}
+                    for rule, outcome in result_rules.items():
+                        rm = re.match(rf'^(\w+)([><=]+)([\d.]+)$', rule)
+                        if not rm or rm.group(1) not in match_keys:
+                            continue
+                        op, thr = rm.group(2), float(rm.group(3))
+                        if outcome == '异常' and err_thr is None:
+                            err_thr = thr
+                            if op in ('<', '<='):
+                                direction = 'lt'
+                            elif op in ('>', '>='):
+                                direction = 'gt'
+                        elif outcome == '需关注' and warn_thr is None:
+                            warn_thr = thr
+                            if op in ('<', '<='):
+                                direction = 'lt'
+                            elif op in ('>', '>='):
+                                direction = 'gt'
+        
+        if err_thr is None and warn_thr is None:
+            continue
+        
+        has_threshold = True
+        is_gt = direction == 'gt'
+        
+        if err_thr is not None:
+            if (is_gt and val > err_thr) or (not is_gt and val < err_thr):
                 return '异常'
         
-        if mc.warn_threshold is not None:
-            if (is_gt and val > mc.warn_threshold) or (not is_gt and val < mc.warn_threshold):
+        if warn_thr is not None:
+            if (is_gt and val > warn_thr) or (not is_gt and val < warn_thr):
                 worst_result = '需关注'
     
     return worst_result if has_threshold else None
@@ -639,6 +679,34 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
                 logger.info(f'  PARSE: 计算指标 {target_key} = {formula} = {result}')
             except Exception as e:
                 logger.info(f'  PARSE: 公式计算失败 {target_key}={formula}: {e}')
+
+    # 自定义公式计算（基于 calc_config）
+    if calc_config and calc_config.get('type') == 'custom':
+        try:
+            fields = calc_config.get('fields', [])
+            formula = calc_config.get('formula', '')
+            result_name = calc_config.get('result_name', '')
+            if formula and fields and result_name:
+                env = {}
+                all_found = True
+                for i, f in enumerate(fields):
+                    v = metrics.get(f, '')
+                    try:
+                        v = float(v)
+                    except (ValueError, TypeError):
+                        all_found = False
+                        break
+                    env[chr(97 + i)] = v
+                if all_found:
+                    result = eval(formula, {"__builtins__": {}}, env)
+                    if isinstance(result, float) and result == int(result):
+                        result = int(result)
+                    else:
+                        result = round(result, 4)
+                    metrics[result_name] = result
+                    logger.info(f'  PARSE: 自定义公式 {result_name} = {formula} = {result}')
+        except Exception as e:
+            logger.info(f'  PARSE: 自定义公式计算失败: {e}')
 
     # 识别区域名称（跳过位置匹配时不提取）
     skip_location = matched_type.get('skip_location_match', False) if matched_type else False
@@ -1034,7 +1102,7 @@ def api_export_excel():
                             online_val = 0
                         break
                 
-                # 总数优先使用 metrics 中的值（如 OCR 识别的总数或计算指标）
+                # 总数：优先使用 metrics 中的 "总数"，无则汇总所有计数类指标
                 total = 0
                 for k in ['总数', 'total', 'Total']:
                     v = metrics.get(k, '')
@@ -1045,20 +1113,17 @@ def api_export_excel():
                             pass
                         break
                 if total == 0:
-                    # 回退到"在线"指标对应的 max_value
-                    obj_metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
-                    online_metric = None
-                    for m in obj_metrics:
-                        if m.key in ['在线', 'online'] or m.name in ['在线', 'online']:
-                            online_metric = m
-                            break
-                    if online_metric and online_metric.max_value:
-                        total = int(float(online_metric.max_value))
-                    elif obj_metrics:
-                        for m in obj_metrics:
-                            if m.max_value:
-                                total = int(float(m.max_value))
-                                break
+                    # 汇总所有数值型指标（排除百分比/率类和总数类，避免重复计算）
+                    skip_keys = {'在线率', 'onlinerate', 'rate', '总数', 'total', 'Total'}
+                    for k, v in metrics.items():
+                        if k.startswith('_') or k in skip_keys or '总数' in k or 'total' in k.lower():
+                            continue
+                        try:
+                            n = float(str(v).replace('%', '').strip())
+                            if n > 0:
+                                total += int(n)
+                        except:
+                            pass
                 
                 # 离线值 = 总数 - 在线
                 offline_val = max(0, total - online_val) if total > 0 else None
@@ -1361,6 +1426,240 @@ def api_inspection_history_delete(record_id):
         session.close()
 
 
+@main.route('/api/records/backfill', methods=['POST'])
+def api_records_backfill():
+    """回填历史记录：补全缺失的"总数"和"离线"字段（仅从已有完整记录推算，不使用 max_value）"""
+    session = SessionLocal()
+    try:
+        objects = session.query(InspectionObject).filter_by(status='active').all()
+        updated = 0
+        for obj in objects:
+            records = (
+                session.query(InspectionRecord)
+                .filter_by(object_id=obj.id)
+                .order_by(InspectionRecord.timestamp.desc())
+                .all()
+            )
+            if not records:
+                continue
+
+            # 仅从已有记录中获取已知总数（不使用 max_value）
+            known_total = 0
+            for r in records:
+                m = json.loads(r.metrics) if r.metrics else {}
+                for k in ['总数', 'total', 'Total']:
+                    v = m.get(k, '')
+                    if v != '':
+                        try:
+                            known_total = int(float(v))
+                        except:
+                            pass
+                        break
+                if known_total > 0:
+                    break
+
+            for r in records:
+                m = json.loads(r.metrics) if r.metrics else {}
+                changed = False
+
+                # 补全总数
+                has_total = False
+                for k in ['总数', 'total', 'Total']:
+                    if m.get(k, '') != '':
+                        has_total = True
+                        break
+                if not has_total and known_total > 0:
+                    m['总数'] = known_total
+                    changed = True
+
+                # 补全离线 = 总数 - 在线
+                online_val = None
+                for k in ['在线', 'online']:
+                    v = m.get(k, '')
+                    if v != '':
+                        try:
+                            online_val = int(float(v))
+                        except:
+                            pass
+                        break
+                has_offline = False
+                for k in ['离线', 'offline']:
+                    if m.get(k, '') != '':
+                        has_offline = True
+                        break
+                total_val = None
+                for k in ['总数', 'total', 'Total']:
+                    v = m.get(k, '')
+                    if v != '':
+                        try:
+                            total_val = int(float(v))
+                        except:
+                            pass
+                        break
+                if not has_offline and online_val is not None and total_val and total_val > 0:
+                    m['离线'] = max(0, total_val - online_val)
+                    changed = True
+
+                if changed:
+                    r.metrics = json.dumps(m, ensure_ascii=False)
+                    updated += 1
+
+        session.commit()
+        return jsonify({'ok': True, 'updated': updated})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@main.route('/api/records/cleanup', methods=['POST'])
+def api_records_cleanup():
+    """清理错误的"总数"和"离线"：移除所有记录中的这两个字段，之后可重新回填"""
+    session = SessionLocal()
+    try:
+        records = session.query(InspectionRecord).all()
+        cleaned = 0
+        for r in records:
+            if not r.metrics:
+                continue
+            m = json.loads(r.metrics)
+            changed = False
+            for k in ['总数', 'total', 'Total', '离线', 'offline']:
+                if k in m:
+                    del m[k]
+                    changed = True
+            if changed:
+                r.metrics = json.dumps(m, ensure_ascii=False)
+                cleaned += 1
+        session.commit()
+        return jsonify({'ok': True, 'cleaned': cleaned})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@main.route('/api/records/compute', methods=['POST'])
+def api_records_compute():
+    """计算补全：根据仪表盘类型的计算配置批量计算新指标
+    请求体 JSON:
+    {
+        "configs": [
+            {"calc_type": "sum", "result_name": "在线", "fields": ["停车", "行驶"]},
+            {"calc_type": "percentage", "result_name": "在线率", "numerator": "在线", "denominator": "总数", "denominator_type": "fixed", "denominator_fixed_value": "100"},
+            {"calc_type": "difference", "result_name": "离线", "minuend": "总数", "minuend_type": "fixed", "minuend_fixed": "100", "subtrahend": "在线"}
+        ]
+    }
+    """
+    data = request.get_json()
+    if not data or not data.get('configs'):
+        return jsonify({'error': '请提供计算配置'}), 400
+
+    configs = data['configs']
+    session = SessionLocal()
+    try:
+        records = session.query(InspectionRecord).all()
+        total_updated = 0
+        results_summary = []
+
+        def _num(val):
+            try:
+                return float(val)
+            except:
+                return None
+
+        for cfg in configs:
+            calc_type = cfg.get('calc_type', '')
+            result_name = cfg.get('result_name', '')
+            if not result_name:
+                continue
+
+            updated = 0
+            for r in records:
+                if not r.metrics:
+                    continue
+                m = json.loads(r.metrics)
+                result = None
+
+                if calc_type == 'sum':
+                    fields = cfg.get('fields', [])
+                    vals = []
+                    for f in fields:
+                        v = _num(m.get(f, ''))
+                        if v is None:
+                            vals = []
+                            break
+                        vals.append(v)
+                    if vals:
+                        result = sum(vals)
+
+                elif calc_type == 'percentage':
+                    num_key = cfg.get('numerator', '')
+                    den_type = cfg.get('denominator_type', 'field')
+                    den_key = cfg.get('denominator', '')
+                    num_val = _num(m.get(num_key, ''))
+                    if den_type == 'fixed':
+                        den_val = _num(cfg.get('denominator_fixed_value', ''))
+                    else:
+                        den_val = _num(m.get(den_key, ''))
+                    decimal_places = cfg.get('decimal_places', 2)
+                    fmt = cfg.get('format', 'decimal')
+                    if num_val is not None and den_val is not None and den_val != 0:
+                        raw = num_val / den_val
+                        if fmt == 'percent':
+                            result = round(raw * 100, decimal_places)
+                        else:
+                            result = round(raw, decimal_places)
+
+                elif calc_type == 'difference':
+                    minuend_type = cfg.get('minuend_type', 'field')
+                    minuend_key = cfg.get('minuend', '')
+                    subtrahend_key = cfg.get('subtrahend', '')
+                    if minuend_type == 'fixed':
+                        left_val = _num(cfg.get('minuend_fixed', ''))
+                    else:
+                        left_val = _num(m.get(minuend_key, ''))
+                    right_val = _num(m.get(subtrahend_key, ''))
+                    if left_val is not None and right_val is not None:
+                        result = round(left_val - right_val, 2)
+
+                elif calc_type == 'custom':
+                    fields = cfg.get('fields', [])
+                    formula = cfg.get('formula', '')
+                    if formula and fields:
+                        env = {}
+                        all_found = True
+                        for i, f in enumerate(fields):
+                            v = _num(m.get(f, ''))
+                            if v is None:
+                                all_found = False
+                                break
+                            env[chr(97 + i)] = v
+                        if all_found:
+                            try:
+                                result = round(eval(formula, {"__builtins__": {}}, env), 4)
+                            except:
+                                result = None
+
+                if result is not None:
+                    m[result_name] = result
+                    r.metrics = json.dumps(m, ensure_ascii=False)
+                    updated += 1
+
+            total_updated += updated
+            results_summary.append(f'{result_name}: {updated} 条')
+
+        session.commit()
+        return jsonify({'ok': True, 'updated': total_updated, 'details': results_summary})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
 @main.route('/objects')
 def objects():
     """巡检对象管理页面"""
@@ -1537,6 +1836,63 @@ def api_objects_list():
             }
             for o in objects
         ])
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/suggestions')
+def api_objects_suggestions():
+    """获取巡检对象建议（用于自动补全）"""
+    query = request.args.get('q', '').strip().lower()
+    field = request.args.get('field', 'name')  # name, location, device_type
+    
+    if not query or len(query) < 1:
+        return jsonify([])
+    
+    session = SessionLocal()
+    try:
+        suggestions = set()
+        
+        if field == 'name':
+            # 搜索名称
+            for row in session.query(InspectionObject.name).filter(
+                InspectionObject.status == 'active',
+                InspectionObject.name.ilike(f'%{query}%')
+            ).distinct().limit(10):
+                if row[0]:
+                    suggestions.add(row[0])
+        
+        elif field == 'location':
+            # 搜索位置
+            for row in session.query(InspectionObject.location).filter(
+                InspectionObject.status == 'active',
+                InspectionObject.location.ilike(f'%{query}%'),
+                InspectionObject.location.isnot(None),
+                InspectionObject.location != ''
+            ).distinct().limit(10):
+                if row[0]:
+                    suggestions.add(row[0])
+        
+        elif field == 'device_type':
+            # 搜索设备类型
+            # 先从数据库获取
+            for row in session.query(InspectionObject.device_type).filter(
+                InspectionObject.status == 'active',
+                InspectionObject.device_type.ilike(f'%{query}%'),
+                InspectionObject.device_type.isnot(None),
+                InspectionObject.device_type != ''
+            ).distinct().limit(10):
+                if row[0]:
+                    suggestions.add(row[0])
+            
+            # 再从仪表盘类型获取
+            types_list = _load_dashboard_types()
+            for t in types_list:
+                cat = t.get('category', '')
+                if cat and query in cat.lower():
+                    suggestions.add(cat)
+        
+        return jsonify(sorted(suggestions))
     finally:
         session.close()
 
@@ -2312,12 +2668,61 @@ def api_dashboard_types_list():
     return jsonify(_load_dashboard_types())
 
 
+@main.route('/api/dashboard-types/calc-configs', methods=['GET'])
+def api_dashboard_types_calc_configs():
+    """获取所有仪表盘类型的计算配置（用于数据维护计算补全）"""
+    types_list = _load_dashboard_types()
+    configs = []
+    for t in types_list:
+        calc = t.get('calc_config')
+        if not calc or not calc.get('type') or not calc.get('result_name'):
+            continue
+        calc_type = calc.get('type')
+        cfg = {
+            'type_id': t.get('id'),
+            'type_name': t.get('name'),
+            'calc_type': calc_type,
+            'result_name': calc.get('result_name'),
+            'show_chart': calc.get('show_chart', False),
+            'max_value': calc.get('max_value')
+        }
+        if calc_type == 'sum':
+            cfg['fields'] = calc.get('fields', [])
+        elif calc_type == 'percentage':
+            cfg['numerator'] = calc.get('numerator', '')
+            cfg['denominator'] = calc.get('denominator', '')
+            cfg['denominator_type'] = calc.get('denominator_type', 'field')
+            cfg['decimal_places'] = calc.get('decimal_places', 2)
+            cfg['format'] = calc.get('format', 'decimal')
+        elif calc_type == 'difference':
+            cfg['minuend'] = calc.get('minuend', '')
+            cfg['minuend_type'] = calc.get('minuend_type', 'field')
+            cfg['minuend_fixed'] = calc.get('minuend_fixed', '')
+            cfg['subtrahend'] = calc.get('subtrahend', '')
+        elif calc_type == 'custom':
+            cfg['fields'] = calc.get('fields', [])
+            cfg['formula'] = calc.get('formula', '')
+        configs.append(cfg)
+    return jsonify(configs)
+
+
 @main.route('/api/dashboard-types/categories', methods=['GET'])
 def api_dashboard_types_categories():
-    """获取所有仪表盘分类"""
+    """获取所有仪表盘分类（合并 JSON 配置 + 数据库中实际使用的分类）"""
     types_list = _load_dashboard_types()
-    categories = sorted(set(t.get('category', '') for t in types_list if t.get('category', '').strip()))
-    return jsonify(categories)
+    cats = set(t.get('category', '') for t in types_list if t.get('category', '').strip())
+    session = SessionLocal()
+    try:
+        for row in session.query(InspectionObject.device_type).filter(
+            InspectionObject.status == 'active',
+            InspectionObject.device_type.isnot(None),
+            InspectionObject.device_type != ''
+        ).distinct():
+            if row[0]:
+                cats.add(row[0])
+    finally:
+        session.close()
+    return jsonify(sorted(cats))
 
 
 @main.route('/api/dashboard-types', methods=['POST'])

@@ -210,9 +210,35 @@
             
             <!-- 自定义公式 -->
             <div id="calc-custom" class="calc-section">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">结果名称</label>
+                        <input type="text" class="form-control form-control-sm" id="calc-custom-name" placeholder="如: 自定义指标">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">图表最大值 <small class="text-muted">（Y轴上限）</small></label>
+                        <input type="number" class="form-control form-control-sm" id="calc-custom-max" placeholder="如: 100">
+                    </div>
+                </div>
                 <div class="mb-3">
-                    <label class="form-label">计算公式 <small class="text-muted">（每行一个，格式: 目标key=公式，如 online=行驶+停车）</small></label>
-                    <textarea class="form-control" id="modal-type-formulas" rows="3" placeholder="online=行驶+停车&#10;total=行驶+停车+离线"></textarea>
+                    <label class="form-label">选择字段 <small class="text-muted">（勾选参与计算的字段）</small></label>
+                    <div id="calc-custom-fields" class="calc-fields-checkboxes"></div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">计算公式 <small class="text-muted">（使用 a/b/c 代表勾选的字段，按顺序对应）</small></label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" id="calc-custom-formula" placeholder="如: a + b">
+                        <button class="btn btn-outline-secondary" type="button" id="calc-custom-help" style="font-size:0.75rem">插入</button>
+                    </div>
+                    <div id="calc-custom-insert-panel" style="display:none;margin-top:0.5rem;padding:0.5rem;background:var(--bg-elevated);border-radius:6px;">
+                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem;">点击插入变量：</div>
+                        <div id="calc-custom-vars" style="display:flex;flex-wrap:wrap;gap:0.3rem;"></div>
+                    </div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.3rem;">示例: <code>a + b</code> <code>a / b * 100</code> <code>a - b - c</code></div>
+                </div>
+                <div class="form-check mt-2 mb-3">
+                    <input class="form-check-input" type="checkbox" id="calc-custom-show-chart" checked>
+                    <label class="form-check-label" for="calc-custom-show-chart" style="font-size:0.85rem">计算结果在图表中显示</label>
                 </div>
             </div>
             
@@ -302,7 +328,7 @@
                 <div class="row mb-3">
                     <div class="col-md-6">
                         <label class="form-label">结果名称</label>
-                        <input type="text" class="form-control form-control-sm" id="calc-diff-name" placeholder="如: 变化量">
+                        <input type="text" class="form-control form-control-sm" id="calc-diff-name" placeholder="如: 离线">
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">图表最大值 <small class="text-muted">（Y轴上限）</small></label>
@@ -313,9 +339,12 @@
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label class="form-label">被减数字段</label>
-                            <select class="form-control form-control-sm" id="calc-diff-minuend">
-                                <option value="">选择字段</option>
-                            </select>
+                            <div class="input-group input-group-sm">
+                                <select class="form-control" id="calc-diff-minuend">
+                                    <option value="">选择字段</option>
+                                </select>
+                                <button class="btn btn-outline-secondary" type="button" id="calc-diff-minuend-toggle" style="font-size:0.75rem">固定值</button>
+                            </div>
                         </div>
                     </div>
                     <div class="col-md-6">
@@ -326,6 +355,10 @@
                             </select>
                         </div>
                     </div>
+                </div>
+                <div id="calc-diff-fixed-group" style="display:none" class="mb-3">
+                    <label class="form-label" style="font-size:0.85rem">被减数固定值</label>
+                    <input type="number" class="form-control form-control-sm" id="calc-diff-fixed-value" placeholder="如: 100">
                 </div>
                 <div class="form-check mt-2 mb-3">
                     <input class="form-check-input" type="checkbox" id="calc-diff-show-chart" checked>
@@ -569,7 +602,6 @@
         document.getElementById('modal-type-category').value = t.category || '';
         document.getElementById('modal-type-keywords').value = (t.detect_keywords || []).join('\n');
         document.getElementById('modal-type-labels').value = Object.entries(t.labels || {}).map(([k, v]) => `${k}=${v}`).join('\n');
-        document.getElementById('modal-type-formulas').value = Object.entries(t.formulas || {}).map(([k, v]) => `${k}=${v}`).join('\n');
         document.getElementById('modal-type-extra-rate').checked = (t.extra_labels || []).includes('在线率');
         document.getElementById('modal-type-rules').value = Object.entries(t.result_rules || {}).map(([k, v]) => `${k}=${v}`).join('\n');
         document.getElementById('modal-type-num-before').checked = !!t.number_before_label;
@@ -612,10 +644,34 @@
                 }, 100);
             } else if (calcConfig.type === 'difference') {
                 document.getElementById('calc-diff-name').value = calcConfig.result_name || '';
-                document.getElementById('calc-diff-minuend').value = calcConfig.minuend || '';
                 document.getElementById('calc-diff-subtrahend').value = calcConfig.subtrahend || '';
                 document.getElementById('calc-diff-show-chart').checked = calcConfig.show_chart !== false;
                 document.getElementById('calc-diff-max').value = calcConfig.max_value || '';
+                // 恢复被减数固定值配置
+                const useFixedMinuend = calcConfig.minuend_type === 'fixed';
+                if (useFixedMinuend) {
+                    diffMinuendToggle.textContent = '字段';
+                    diffMinuendSelect.style.display = 'none';
+                    diffFixedGroup.style.display = '';
+                    document.getElementById('calc-diff-fixed-value').value = calcConfig.minuend_fixed || '';
+                } else {
+                    diffMinuendToggle.textContent = '固定值';
+                    diffMinuendSelect.style.display = '';
+                    diffFixedGroup.style.display = 'none';
+                    diffMinuendSelect.value = calcConfig.minuend || '';
+                }
+            } else if (calcConfig.type === 'custom') {
+                document.getElementById('calc-custom-name').value = calcConfig.result_name || '';
+                document.getElementById('calc-custom-formula').value = calcConfig.formula || '';
+                document.getElementById('calc-custom-show-chart').checked = calcConfig.show_chart !== false;
+                document.getElementById('calc-custom-max').value = calcConfig.max_value || '';
+                setTimeout(() => {
+                    (calcConfig.fields || []).forEach(f => {
+                        const cb = document.getElementById(`custom-field-${f}`);
+                        if (cb) cb.checked = true;
+                    });
+                    updateCustomVars();
+                }, 100);
             }
         } else {
             calcTypeSelect.value = 'custom';
@@ -714,6 +770,16 @@
         document.getElementById('calc-diff-subtrahend').value = '';
         document.getElementById('calc-diff-show-chart').checked = true;
         document.getElementById('calc-diff-max').value = '';
+        document.getElementById('calc-diff-fixed-value').value = '';
+        diffMinuendToggle.textContent = '固定值';
+        diffMinuendSelect.style.display = '';
+        diffFixedGroup.style.display = 'none';
+        
+        document.getElementById('calc-custom-name').value = '';
+        document.getElementById('calc-custom-formula').value = '';
+        document.getElementById('calc-custom-show-chart').checked = true;
+        document.getElementById('calc-custom-max').value = '';
+        document.getElementById('calc-custom-insert-panel').style.display = 'none';
         
         document.getElementById('modal-advanced-fields').style.display = 'none';
         document.getElementById('modal-create-hint').style.display = '';
@@ -888,6 +954,20 @@
                 </div>
             `).join('');
         }
+        
+        // 更新自定义公式字段
+        const customFieldsDiv = document.getElementById('calc-custom-fields');
+        if (customFieldsDiv) {
+            const currentChecked = [...customFieldsDiv.querySelectorAll('input:checked')].map(i => i.value);
+            customFieldsDiv.innerHTML = Object.entries(labels).map(([k, v]) => `
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="custom-field-${escAttr(v)}" value="${escAttr(v)}" ${currentChecked.includes(v) ? 'checked' : ''}>
+                    <label class="form-check-label" for="custom-field-${escAttr(v)}">${escHtml(k)}</label>
+                </div>
+            `).join('');
+            // 更新变量插入面板
+            updateCustomVars();
+        }
     }
     
     calcTypeSelect.addEventListener('change', updateCalcTypeFields);
@@ -895,6 +975,38 @@
         if (calcTypeSelect.value !== 'custom') {
             updateCalcFieldOptions();
         }
+    });
+    
+    // 自定义公式 - 更新变量列表
+    function updateCustomVars() {
+        const checked = [...document.querySelectorAll('#calc-custom-fields input:checked')].map(i => i.value);
+        const varsDiv = document.getElementById('calc-custom-vars');
+        const vars = ['a', 'b', 'c', 'd', 'e', 'f'];
+        varsDiv.innerHTML = checked.map((field, i) => {
+            if (i >= vars.length) return '';
+            return '<button type="button" class="btn btn-outline-secondary btn-sm custom-var-btn" ' +
+                'data-var="' + vars[i] + '" style="font-size:0.75rem;padding:0.2rem 0.5rem;">' +
+                vars[i] + ' = ' + escHtml(field) + '</button>';
+        }).join('');
+        // 绑定点击事件
+        varsDiv.querySelectorAll('.custom-var-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const formulaInput = document.getElementById('calc-custom-formula');
+                const varName = this.getAttribute('data-var');
+                const pos = formulaInput.selectionStart;
+                const text = formulaInput.value;
+                formulaInput.value = text.substring(0, pos) + varName + text.substring(pos);
+                formulaInput.focus();
+                formulaInput.setSelectionRange(pos + varName.length, pos + varName.length);
+            });
+        });
+    }
+    
+    // 自定义公式 - 插入面板切换
+    document.getElementById('calc-custom-help').addEventListener('click', function() {
+        const panel = document.getElementById('calc-custom-insert-panel');
+        panel.style.display = panel.style.display === 'none' ? '' : 'none';
+        if (panel.style.display !== 'none') updateCustomVars();
     });
     
     // 百分比分母切换
@@ -915,10 +1027,38 @@
         }
     });
     
+    // 差值被减数切换
+    const diffMinuendToggle = document.getElementById('calc-diff-minuend-toggle');
+    const diffMinuendSelect = document.getElementById('calc-diff-minuend');
+    const diffFixedGroup = document.getElementById('calc-diff-fixed-group');
+    
+    diffMinuendToggle.addEventListener('click', () => {
+        if (diffMinuendToggle.textContent === '固定值') {
+            diffMinuendToggle.textContent = '字段';
+            diffMinuendSelect.style.display = 'none';
+            diffFixedGroup.style.display = '';
+        } else {
+            diffMinuendToggle.textContent = '固定值';
+            diffMinuendSelect.style.display = '';
+            diffFixedGroup.style.display = 'none';
+        }
+    });
+    
     function getCalcConfig() {
         const type = calcTypeSelect.value;
         if (type === 'custom') {
-            return null;
+            const resultName = document.getElementById('calc-custom-name').value;
+            const formula = document.getElementById('calc-custom-formula').value;
+            const fields = [...document.querySelectorAll('#calc-custom-fields input:checked')].map(i => i.value);
+            if (!resultName || !formula || fields.length === 0) return null;
+            return {
+                type: 'custom',
+                result_name: resultName,
+                fields: fields,
+                formula: formula,
+                show_chart: document.getElementById('calc-custom-show-chart').checked,
+                max_value: parseFloat(document.getElementById('calc-custom-max').value) || null
+            };
         }
         
         if (type === 'percentage') {
@@ -960,13 +1100,17 @@
         
         if (type === 'difference') {
             const resultName = document.getElementById('calc-diff-name').value;
-            const minuend = document.getElementById('calc-diff-minuend').value;
+            const useFixedMinuend = diffMinuendToggle.textContent === '字段';
+            const minuend = useFixedMinuend ? diffMinuendSelect.value : '';
+            const fixedMinuendValue = useFixedMinuend ? '' : document.getElementById('calc-diff-fixed-value').value;
             const subtrahend = document.getElementById('calc-diff-subtrahend').value;
-            if (!resultName || !minuend || !subtrahend) return null;
+            if (!resultName || (!minuend && !fixedMinuendValue) || !subtrahend) return null;
             return { 
                 type: 'difference', 
                 result_name: resultName, 
                 minuend: minuend, 
+                minuend_type: useFixedMinuend ? 'field' : 'fixed',
+                minuend_fixed: useFixedMinuend ? '' : fixedMinuendValue,
                 subtrahend: subtrahend,
                 show_chart: document.getElementById('calc-diff-show-chart').checked,
                 max_value: parseFloat(document.getElementById('calc-diff-max').value) || null
@@ -1005,13 +1149,6 @@
             });
 
             const formulas = {};
-            document.getElementById('modal-type-formulas').value.split('\n').forEach(line => {
-                line = line.trim();
-                if (line.includes('=')) {
-                    const [k, v] = line.split('=', 2);
-                    formulas[k.trim()] = v.trim();
-                }
-            });
 
             const extraLabels = document.getElementById('modal-type-extra-rate').checked ? ['在线率'] : [];
             const generatedId = typeId || name.toLowerCase().replace(/[^a-z0-9]/g, '') || ('type_' + Date.now());
@@ -1030,7 +1167,6 @@
                 finalFormulas = {
                     [calcConfig.result_name]: `${numerator}/${denomExpr}`
                 };
-                // 添加格式信息到 extra_labels
                 if (!extraLabels.includes('_pct_config')) {
                     extraLabels.push('_pct_config');
                 }

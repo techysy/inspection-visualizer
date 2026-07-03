@@ -16,6 +16,8 @@
 - 🎨 **主题切换**：深色 / 浅色 / 跟随系统，偏好本地保存
 - 🔎 **双维度筛选**：按位置 + 分类组合筛选巡检对象
 - 📤 **数据导出**：下拉菜单导出为 JSON / 自包含 HTML 文件 / Excel 巡检报告（含在线率、离线自动计算）
+- 🧮 **计算类别补全**：数据维护支持百分比、差值、求和、自定义公式计算新指标
+- 🔍 **对象列表筛选**：对象管理页面输入名称/位置/分类实时筛选匹配的巡检对象
 - 🗂️ **历史记录按周折叠**：详情页历史记录按本周/上周/更早分组，上周及更早自动收起
 - 📥 **批量导入**：支持 Markdown 表格、CSV、JSON 格式，两步操作（识别预览 → 确认导入）
 - 🔧 **全局变量**：可配置 OCR 位置提取时的跳过关键词
@@ -137,7 +139,9 @@ inspection-visualizer/
 ├── dashboard_types.json    # 仪表盘类型配置（关键词/标签映射/结果规则）
 ├── ocr_config.json         # OCR 引擎参数配置
 ├── global_vars.json        # 全局变量配置（跳过关键词等）
-├── app.log                 # 运行日志
+│
+├── log/                    # 运行日志（按日轮转，保留 30 天）
+│   └── app.log
 │
 ├── models/
 │   ├── __init__.py
@@ -234,6 +238,7 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/ocr` | POST | 🔍 OCR 识别接口 |
 | `/api/save` | POST | 💾 保存识别结果 |
 | `/api/objects/list` | GET | 📋 对象列表 JSON |
+| `/api/objects/suggestions` | GET | 🔍 获取对象建议（自动补全，参数：`q` 查询词, `field` 字段：name/location/device_type） |
 | `/api/points/list` | GET | 📍 巡检点列表（兼容接口） |
 | `/api/objects/<id>/metrics` | GET | 📊 获取对象指标配置 |
 | `/api/objects/<id>/metrics` | POST | ➕ 添加指标配置 |
@@ -247,6 +252,7 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/dashboard-types/<id>` | PUT | ✏️ 更新仪表盘类型 |
 | `/api/dashboard-types/<id>` | DELETE | 🗑️ 删除仪表盘类型 |
 | `/api/dashboard-types/categories` | GET | 📂 获取所有仪表盘分类 |
+| `/api/dashboard-types/calc-configs` | GET | 🧮 获取所有仪表盘类型的计算配置 |
 | `/api/dashboard-types/sync` | POST | 🔄 从巡检对象批量同步指标 |
 | `/api/dashboard-types/<id>/sync` | POST | 🔄 从巡检对象同步指标到指定类型 |
 | `/api/global-vars` | GET | 🔧 获取全局变量配置 |
@@ -257,6 +263,9 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/records/import` | POST | 📥 批量导入巡检记录 |
 | `/api/inspection_history/<id>` | GET | 📜 巡检历史 JSON API |
 | `/api/inspection_history/delete/<id>` | POST | 🗑️ 删除巡检记录 |
+| `/api/records/backfill` | POST | 🔄 回填历史记录（补全缺失的总数/离线） |
+| `/api/records/cleanup` | POST | 🧹 清理错误的总数/离线字段 |
+| `/api/records/compute` | POST | 🧮 计算补全指标（求和/百分比/差值/自定义公式） |
 | `/api/export/excel` | GET/POST | 📤 导出巡检报告 Excel（含在线率、离线计算） |
 | `/export/json` | GET | 📤 导出全部数据 JSON |
 | `/export/html` | GET | 🌐 导出全部数据 HTML |

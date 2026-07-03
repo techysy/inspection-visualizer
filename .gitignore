@@ -25,4 +25,4 @@ Thumbs.db
 
 # Runtime
 server.pid
-*.log
+log/
