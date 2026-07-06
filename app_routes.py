@@ -20,6 +20,7 @@ log_handler = logging.handlers.TimedRotatingFileHandler(
     log_file, when='midnight', interval=1, backupCount=30, encoding='utf-8'
 )
 log_handler.suffix = '%Y-%m-%d'
+log_handler.namer = lambda name: str(log_dir / f'app{name[-10:]}.log')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -610,15 +611,16 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
 
         # 如果行本身就是一个标签名（没有数字），加入待处理队列等待下一行的数字
         if not line_matched:
+            found_new_label = False
             for label in sorted_labels:
                 if line.strip() == label:
                     pending_labels = [label]
+                    found_new_label = True
                     logger.info(f'  PARSE: 标签行 "{label}" 等待数字')
                     break
-            else:
-                pending_labels = []
-                if unmatched_lines is not None and len(line) >= 2 and not re.match(r'^\d+$', line):
-                    unmatched_lines.append(line)
+            # 非标签非数字行（如"监控点总数"）不清除 pending_labels，保留等待后续数字
+            if not found_new_label and unmatched_lines is not None and len(line) >= 2 and not re.match(r'^\d+$', line):
+                unmatched_lines.append(line)
 
     # 识别在线率百分比（如果有 extra_labels 包含"在线率"）
     extra_labels = matched_type.get('extra_labels', [])

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <img src="icons/icon48.png" alt="icon" class="logo">
+      <span class="title">巡检截图识别</span>
+    </div>
+    <div class="header-right">
+      <span class="version">v1.0</span>
+    </div>
+  </div>
+
+  <div class="content">
+    <button id="btnCapture" class="btn btn-primary">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>
+      </svg>
+      <span>框选截图识别</span>
+    </button>
+
+    <div id="previewArea" class="preview-area hidden">
+      <img id="previewImg" src="" alt="preview">
+    </div>
+
+    <div id="status" class="status hidden"></div>
+
+    <div id="results" class="results"></div>
+
+    <div id="rawText" class="raw-text hidden"></div>
+
+    <button id="btnSave" class="btn btn-success hidden">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+      </svg>
+      <span>保存到系统</span>
+    </button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -7,6 +7,7 @@
 ## ✨ 功能特点
 
 - 📷 **截图识别**：支持 Ctrl+V 粘贴、拖拽、点击上传巡检表单截图
+- 🔌 **Chrome 扩展**：浏览器插件框选页面区域截图并自动识别，无需切换页面
 - 🔬 **OCR 识别**：基于 RapidOCR 自动提取位置、监控点数据、在线率等信息
 - 📊 **仪表盘解析**：支持自定义仪表盘类型，自动识别并提取结构化指标，支持分类管理
 - ⚙️ **指标配置**：为每个巡检对象配置需要跟踪的指标（名称、单位），可单独开关是否参与图表可视化
@@ -31,6 +32,7 @@
 - 🔤 RapidOCR (ONNX Runtime) — 图片文字识别
 - 🖼️ Pillow — 图片处理
 - 🎨 Bootstrap 5 + Chart.js — 前端
+- 🔌 Chrome Extension (Manifest V3) — 浏览器插件
 
 ## 🚀 快速开始
 
@@ -70,12 +72,26 @@ python app.py
 
 ### 📷 截图识别
 
+**方式一：系统内上传**
+
 1. 在巡检表单或仪表盘页面截图（或复制截图到剪贴板）
 2. 点击导航栏「截图识别」
 3. 粘贴 (Ctrl+V)、拖拽或点击上传截图
 4. 点击「开始识别」，系统自动提取位置、监控数据等信息
 5. 系统自动按位置匹配巡检对象，匹配失败可手动选择
 6. 确认无误后点击「确认保存」，数据写入数据库
+
+**方式二：Chrome 扩展框选截图**
+
+浏览器插件，直接在任意页面框选区域截图并自动识别，无需手动切换页面。
+
+1. 安装：打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选择 `chrome-extension` 文件夹
+2. 打开巡检表单或仪表盘页面
+3. 点击工具栏扩展图标 → 点击「框选截图识别」
+4. 在页面上拖拽框选需要识别的区域，松开后自动截图并 OCR 识别
+5. 编辑识别到的数值 → 点击「保存到系统」
+
+> 详见 [chrome-extension/README.md](chrome-extension/README.md)
 
 ### 📦 对象管理
 
@@ -158,7 +174,14 @@ inspection-visualizer/
 │   ├── ocr_admin.html      # OCR管理（仪表盘类型/全局变量/识别参数/测试识别）
 │   └── bulk_import.html    # 批量导入（Markdown/CSV/JSON，两步识别预览）
 │
-└── static/css/style.css    # 全局样式（深色/浅色双主题）
+├── static/css/style.css    # 全局样式（深色/浅色双主题）
+│
+└── chrome-extension/        # 🔌 Chrome 扩展（框选截图OCR识别）
+    ├── manifest.json
+    ├── popup.html/js         # 弹出窗口 UI
+    ├── content.js/css        # 页面框选覆盖层
+    ├── background.js         # 后台消息中转
+    └── icons/                # 扩展图标
 ```
 
 ## 🗄️ 数据模型
