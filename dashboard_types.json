@@ -98,6 +98,44 @@
         "show_chart": true,
         "max_value": null
       }
+    },
+    {
+      "id": "视频服务器",
+      "name": "录像服务器",
+      "category": "服务器",
+      "description": "录像机仪表盘",
+      "detect_keywords": [
+        "存储池",
+        "录像服务器",
+        "录像池"
+      ],
+      "labels": {
+        "已用容量": "已用容量",
+        "总容量": "总容量"
+      },
+      "formulas": {
+        "已使用": "已用容量/总容量"
+      },
+      "calc_config": {
+        "type": "percentage",
+        "result_name": "已使用",
+        "numerator": "已用容量",
+        "denominator_type": "field",
+        "denominator": "总容量",
+        "decimal_places": 2,
+        "format": "percent",
+        "show_chart": true,
+        "max_value": 1
+      },
+      "extra_labels": [
+        "_pct_config"
+      ],
+      "result_rules": {
+        "capacity_rate>80": "需关注",
+        "capacity_rate>90": "异常"
+      },
+      "number_before_label": false,
+      "skip_location_match": true
     }
   ]
 }

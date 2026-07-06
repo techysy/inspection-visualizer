@@ -178,7 +178,7 @@
         const ocrLocation = skipLocation ? '' : (item.ocr_location || '').toLowerCase();
         const expectedType = item.dashboard_category || item.dashboard_type_name || ({ 'monitor': '监控', 'vehicle': '车辆', 'badge': '工牌' }[item.dashboard_type] || '');
         for (const p of allPoints) {
-            if (expectedType && (!p.device_type || p.device_type.toLowerCase() !== expectedType.toLowerCase())) continue;
+            if (expectedType && p.device_type && p.device_type.toLowerCase() !== expectedType.toLowerCase()) continue;
             let score = 0;
             let hasNameMatch = false;
             let hasLocationMatch = false;

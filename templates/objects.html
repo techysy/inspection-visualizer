@@ -144,9 +144,10 @@
                             </div>
                             <div class="col-6">
                                 <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">分类</label>
-                                <select class="form-select" name="device_type" id="obj-edit-category-{{ obj.id }}" data-current="{{ obj.device_type or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
-                                    <option value="">-</option>
-                                </select>
+                                <div class="autocomplete-wrapper" style="position:relative;">
+                                    <input type="text" class="form-control" name="device_type" value="{{ obj.device_type or '' }}" placeholder="分类" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
+                                    <div class="autocomplete-dropdown" id="edit-device-type-dropdown-{{ obj.id }}" style="display:none;"></div>
+                                </div>
                             </div>
                             <div class="col-6">
                                 <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">状态</label>
@@ -490,6 +491,59 @@ function setupAutocomplete(inputId, dropdownId, field) {
     });
 }
 
+function setupAutocompleteForInput(input, dropdown, field) {
+    if (!input || !dropdown) return;
+    
+    input.addEventListener('input', function() {
+        var query = this.value.trim();
+        var state = autocompleteState[field];
+        
+        clearTimeout(state.timer);
+        
+        if (query.length < 1) {
+            dropdown.style.display = 'none';
+            return;
+        }
+        
+        state.timer = setTimeout(function() {
+            fetch('/api/objects/suggestions?q=' + encodeURIComponent(query) + '&field=' + field)
+                .then(function(r) { return r.json(); })
+                .then(function(items) {
+                    state.items = items;
+                    state.selectedIndex = -1;
+                    
+                    if (items.length === 0) {
+                        dropdown.style.display = 'none';
+                        return;
+                    }
+                    
+                    var html = '';
+                    items.forEach(function(item, index) {
+                        html += '<div class="autocomplete-item" data-index="' + index + '">' + escHtml(item) + '</div>';
+                    });
+                    
+                    dropdown.innerHTML = html;
+                    dropdown.style.display = 'block';
+                    
+                    dropdown.querySelectorAll('.autocomplete-item').forEach(function(item) {
+                        item.addEventListener('mousedown', function(e) {
+                            e.preventDefault();
+                            var idx = parseInt(this.getAttribute('data-index'));
+                            input.value = state.items[idx];
+                            dropdown.style.display = 'none';
+                        });
+                    });
+                });
+        }, 200);
+    });
+    
+    input.addEventListener('blur', function() {
+        setTimeout(function() {
+            dropdown.style.display = 'none';
+        }, 200);
+    });
+}
+
 function updateSelection(items, selectedIndex) {
     items.forEach(function(item, index) {
         if (index === selectedIndex) {
@@ -505,6 +559,15 @@ document.addEventListener('DOMContentLoaded', function() {
     setupAutocomplete('obj-add-name', 'name-dropdown', 'name');
     setupAutocomplete('obj-add-location', 'location-dropdown', 'location');
     setupAutocomplete('obj-add-device-type', 'device-type-dropdown', 'device_type');
+
+    // 为编辑弹窗的分类输入设置自动补全
+    document.querySelectorAll('[id^="edit-device-type-dropdown-"]').forEach(function(dropdown) {
+        var objId = dropdown.id.replace('edit-device-type-dropdown-', '');
+        var input = dropdown.previousElementSibling;
+        if (input) {
+            setupAutocompleteForInput(input, dropdown, 'device_type');
+        }
+    });
 
     var nameInput = document.getElementById('obj-add-name');
     var locInput = document.getElementById('obj-add-location');
@@ -558,7 +621,8 @@ function loadMetrics(objectId) {
             }
             var html = '';
             metrics.forEach(function(m) {
-                html += '<div class="metric-row" id="metric-row-' + objectId + '-' + m.id + '">' +
+                html += '<div class="metric-row" id="metric-row-' + objectId + '-' + m.id + '" draggable="true" data-metric-id="' + m.id + '">' +
+                    '<span class="metric-drag-handle" style="cursor:grab;color:var(--text-muted);font-size:10px;opacity:0.4;">⋮⋮</span>' +
                     '<span style="flex:1;">' + escHtml(m.name) + ' <span style="color:var(--text-faint);font-size:0.7rem;">(' + escHtml(m.key) + (m.unit ? '/' + escHtml(m.unit) : '') + ')' + (m.max_value ? ' max:' + m.max_value : '') + '</span></span>' +
                     '<label style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:0.25rem;cursor:pointer;">' +
                     '<input type="checkbox" ' + (m.show_in_chart ? 'checked' : '') + ' onchange="toggleChart(' + objectId + ',' + m.id + ',this.checked)" style="cursor:pointer;"> 图表</label>' +
@@ -567,7 +631,70 @@ function loadMetrics(objectId) {
                     '</div>';
             });
             listEl.innerHTML = html;
+            setupMetricDragSort(objectId);
         });
+}
+
+function setupMetricDragSort(objectId) {
+    var listEl = document.getElementById('metrics-list-' + objectId);
+    if (!listEl) return;
+    var dragItem = null;
+
+    listEl.addEventListener('dragstart', function(e) {
+        var row = e.target.closest('.metric-row');
+        if (row && row.parentNode === listEl) {
+            dragItem = row;
+            dragItem.style.opacity = '0.4';
+            e.dataTransfer.effectAllowed = 'move';
+        }
+    });
+
+    listEl.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        if (!dragItem) return;
+        var target = e.target.closest('.metric-row');
+        if (target && target !== dragItem && target.parentNode === listEl) {
+            var rect = target.getBoundingClientRect();
+            var midY = rect.top + rect.height / 2;
+            if (e.clientY < midY) {
+                listEl.insertBefore(dragItem, target);
+            } else {
+                listEl.insertBefore(dragItem, target.nextSibling);
+            }
+        }
+    });
+
+    listEl.addEventListener('dragend', function(e) {
+        if (dragItem) {
+            dragItem.style.opacity = '1';
+            dragItem = null;
+        }
+        var rows = listEl.querySelectorAll('.metric-row');
+        var order = [];
+        rows.forEach(function(row) {
+            order.push({id: parseInt(row.getAttribute('data-metric-id'))});
+        });
+        if (order.length > 0) {
+            fetch('/api/objects/' + objectId + '/metrics/sort', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({order: order})
+            });
+        }
+    });
+
+    listEl.addEventListener('drop', function(e) {
+        e.preventDefault();
+    });
+
+    listEl.addEventListener('mouseover', function(e) {
+        var handle = e.target.closest('.metric-drag-handle');
+        if (handle) handle.style.opacity = '1';
+    });
+    listEl.addEventListener('mouseout', function(e) {
+        var handle = e.target.closest('.metric-drag-handle');
+        if (handle) handle.style.opacity = '0.4';
+    });
 }
 
 function showAddMetric(objectId) {
@@ -796,6 +923,16 @@ document.addEventListener('DOMContentLoaded', function() {
     gap: 0.5rem;
     padding: 0.3rem 0;
     border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+}
+.metric-row:hover {
+    background: var(--primary-soft);
+}
+.metric-row:active {
+    cursor: grabbing;
+}
+.metric-drag-handle {
+    user-select: none;
 }
 .store-card:hover .drag-handle {
     opacity: 0.7 !important;

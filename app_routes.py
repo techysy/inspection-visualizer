@@ -119,8 +119,11 @@ def _load_dashboard_types():
 
 
 def _save_dashboard_types(types_list):
-    with open(DASHBOARD_TYPES_PATH, 'w', encoding='utf-8') as f:
+    import tempfile
+    tmp_path = DASHBOARD_TYPES_PATH.with_suffix('.tmp')
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump({'types': types_list}, f, ensure_ascii=False, indent=2)
+    tmp_path.replace(DASHBOARD_TYPES_PATH)
 
 
 def _sync_dashboard_type_from_object(obj, metrics):
@@ -580,6 +583,24 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
             pending_labels = []
             continue
 
+        # 2.5) 匹配 "标签: X单位/Y单位" 格式（如 "已使用/总容量: 269650GiB/407416GiB"）
+        m = re.match(r'^(.*?)[:：]?\s*(\d[\d.]*)\s*[a-zA-Z]*\s*/\s*(\d[\d.]*)\s*[a-zA-Z]+', line)
+        if m:
+            label_text = m.group(1).strip()
+            val1 = float(m.group(2))
+            val2 = float(m.group(3))
+            if val1 == int(val1):
+                val1 = int(val1)
+            if val2 == int(val2):
+                val2 = int(val2)
+            label_keys = list(label_map.keys())
+            if len(label_keys) >= 2:
+                metrics[label_map[label_keys[0]]] = val1
+                metrics[label_map[label_keys[1]]] = val2
+                logger.info(f'  PARSE: X单位/Y单位格式 {label_text or "无标签"} {label_keys[0]}={val1} {label_keys[1]}={val2}')
+            pending_labels = []
+            continue
+
         # 3) 匹配标签行（在行内查找所有出现的标签-数值对）
         sorted_labels = sorted(label_map.keys(), key=len, reverse=True)
         line_matched = False
@@ -652,8 +673,17 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
     if formulas:
         for target_key, formula in formulas.items():
             try:
+                # 支持公式为字符串或对象格式 {expr, decimal_places, suffix}
+                if isinstance(formula, dict):
+                    formula_expr = formula.get('expr', '')
+                    decimal_places = formula.get('decimal_places', 2)
+                    suffix = formula.get('suffix', '')
+                else:
+                    formula_expr = formula
+                    decimal_places = None
+                    suffix = ''
                 # 替换公式中的key名为对应的值（按长度倒序，避免短名误替换长名）
-                eval_expr = formula
+                eval_expr = formula_expr
                 sorted_keys = sorted(label_map.items(), key=lambda x: len(x[1]), reverse=True)
                 for cn_label, short_key in sorted_keys:
                     val = metrics.get(short_key, 0)
@@ -661,8 +691,15 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
                 # 支持 + - * / 运算
                 result = eval(eval_expr)
                 
+                # 应用格式化（round + suffix）
+                if decimal_places is not None:
+                    result = round(float(result), decimal_places)
+                    if suffix:
+                        metrics[target_key] = f'{result}{suffix}'
+                    else:
+                        metrics[target_key] = result
                 # 应用 calc_config 格式化（仅对百分比类型）
-                if calc_config and calc_config.get('type') == 'percentage' and target_key == calc_config.get('result_name'):
+                elif calc_config and calc_config.get('type') == 'percentage' and target_key == calc_config.get('result_name'):
                     decimal_places = calc_config.get('decimal_places', 2)
                     fmt = calc_config.get('format', 'decimal')
                     result = round(float(result), decimal_places)
@@ -1887,12 +1924,15 @@ def api_objects_suggestions():
                 if row[0]:
                     suggestions.add(row[0])
             
-            # 再从仪表盘类型获取
+            # 再从仪表盘类型获取（包括 category 和 name）
             types_list = _load_dashboard_types()
             for t in types_list:
                 cat = t.get('category', '')
                 if cat and query in cat.lower():
                     suggestions.add(cat)
+                name = t.get('name', '')
+                if name and query in name.lower():
+                    suggestions.add(name)
         
         return jsonify(sorted(suggestions))
     finally:
@@ -2030,6 +2070,25 @@ def api_object_metrics_update(object_id, metric_id):
             metric.error_threshold = data['error_threshold']
         if 'threshold_direction' in data:
             metric.threshold_direction = data['threshold_direction']
+        session.commit()
+        return jsonify({'ok': True})
+    finally:
+        session.close()
+
+
+@main.route('/api/objects/<int:object_id>/metrics/sort', methods=['POST'])
+def api_object_metrics_sort(object_id):
+    """保存指标排序"""
+    data = request.get_json()
+    order = data.get('order', [])
+    session = SessionLocal()
+    try:
+        for idx, item in enumerate(order):
+            metric_id = item.get('id')
+            if metric_id:
+                metric = session.query(ObjectMetric).filter_by(id=metric_id, object_id=object_id).first()
+                if metric:
+                    metric.sort_order = idx
         session.commit()
         return jsonify({'ok': True})
     finally:

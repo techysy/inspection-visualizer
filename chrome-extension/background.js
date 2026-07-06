@@ -1,5 +1,31 @@
 const API_BASE = 'http://localhost:5001';
 
+// 监听快捷键
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === 'start-capture') {
+    await startCapture();
+  }
+});
+
+// 启动框选截图
+async function startCapture() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) return;
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['content.js']
+    });
+    await chrome.scripting.insertCSS({
+      target: { tabId: tab.id },
+      files: ['content.css']
+    });
+  } catch (e) {
+    console.error('启动框选失败:', e);
+  }
+}
+
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== 'local') return;
 

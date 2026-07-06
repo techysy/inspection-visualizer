@@ -2,6 +2,8 @@ const API_BASE = 'http://localhost:5001';
 
 const btnCapture = document.getElementById('btnCapture');
 const btnSave = document.getElementById('btnSave');
+const btnView = document.getElementById('btnView');
+const actionButtons = document.getElementById('actionButtons');
 const statusEl = document.getElementById('status');
 const resultsEl = document.getElementById('results');
 const rawTextEl = document.getElementById('rawText');
@@ -10,6 +12,7 @@ const previewImg = document.getElementById('previewImg');
 
 let currentItems = [];
 let currentFlatItems = [];
+let lastSavedObjectId = null;
 
 function setStatus(msg, type) {
   statusEl.textContent = msg;
@@ -173,6 +176,8 @@ function showResultItems(ocrItems) {
   const totalCount = ocrItems.length;
   setStatus(`识别到 ${totalCount} 条记录`, 'success');
   resultsEl.innerHTML = html;
+  show(actionButtons);
+  hide(btnView);
 }
 
 window.onEditValue = function(el) {
@@ -209,12 +214,29 @@ btnSave.addEventListener('click', async () => {
     if (data.skipped_no_match > 0) msg += `，${data.skipped_no_match} 条未匹配`;
     if (data.skipped_duplicate > 0) msg += `，${data.skipped_duplicate} 条重复`;
     setStatus(msg, 'success');
+
+    // 记录保存的 object_id 用于跳转
+    if (data.saved > 0 && currentItems.length > 0) {
+      const firstItem = currentItems[0];
+      if (firstItem.object_id) {
+        lastSavedObjectId = firstItem.object_id;
+      }
+    }
+
     hide(btnSave);
-    currentItems = [];
+    show(btnView);
     currentFlatItems = [];
-    clearOcrStorage();
   } catch (e) {
     setStatus('保存失败: ' + e.message, 'error');
   }
   btnSave.disabled = false;
+});
+
+// 点击查看按钮跳转到详情页
+btnView.addEventListener('click', () => {
+  if (lastSavedObjectId) {
+    chrome.tabs.create({ url: API_BASE + '/object/' + lastSavedObjectId });
+  } else {
+    chrome.tabs.create({ url: API_BASE });
+  }
 });

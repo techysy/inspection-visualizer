@@ -357,6 +357,35 @@ body {
   display: none !important;
 }
 
+/* Action buttons */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.action-buttons .btn {
+  flex: 1;
+}
+
+.btn-view {
+  background: #6366f1;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(99,102,241,0.3);
+}
+
+.btn-view:hover:not(:disabled) {
+  background: #5558e6;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.35);
+}
+
+/* Shortcut hint */
+.shortcut-hint {
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: -4px;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
