@@ -29,6 +29,11 @@
         <input type="text" class="store-input" name="name" placeholder="姓名" required style="flex:1 1 80px;min-width:0;">
         <input type="text" class="store-input" name="team" placeholder="班组" style="flex:1 1 80px;min-width:0;">
         <input type="text" class="store-input" name="contact" placeholder="联系方式" style="flex:1 1 120px;min-width:0;">
+        <input type="text" class="store-input" name="username" placeholder="登录名" style="flex:1 1 80px;min-width:0;">
+        <input type="password" class="store-input" name="password" placeholder="登录密码" style="flex:1 1 80px;min-width:0;">
+        <label class="store-input" style="flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:0 8px;cursor:pointer;white-space:nowrap;border:none;background:transparent;">
+            <input type="checkbox" name="is_admin" style="width:16px;height:16px;cursor:pointer;"> 管理员
+        </label>
         <button type="submit" class="store-add-btn">添加</button>
     </form>
 </div>
@@ -82,9 +87,23 @@
                             <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">班组</label>
                             <input type="text" class="form-control" name="team" value="{{ inspector.team or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
                         </div>
-                        <div class="mb-0">
+                        <div class="mb-3">
                             <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">联系方式</label>
                             <input type="text" class="form-control" name="contact" value="{{ inspector.contact or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">登录名 <small style="color:var(--text-faint);">（用于登录系统）</small></label>
+                            <input type="text" class="form-control" name="username" value="{{ inspector.username or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">登录密码 <small style="color:var(--text-faint);">（留空不修改）</small></label>
+                            <input type="password" class="form-control" name="password" placeholder="新密码" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">
+                                <input type="checkbox" name="is_admin" {% if inspector.is_admin %}checked{% endif %} style="width:16px;height:16px;cursor:pointer;margin-right:6px;vertical-align:middle;">
+                                管理员权限
+                            </label>
                         </div>
                     </div>
                     <div class="modal-footer" style="border-top: 1px solid var(--border); padding: 1rem 1.5rem;">

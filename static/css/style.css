@@ -159,8 +159,17 @@ body {
     color: var(--primary) !important;
     background: var(--primary-soft) !important;
     font-weight: 600;
-    border-bottom: 2px solid var(--primary);
-    border-radius: 8px 8px 0 0;
+    position: relative;
+}
+.nav-link.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 1rem;
+    right: 1rem;
+    height: 2px;
+    background: var(--primary);
+    border-radius: 1px;
 }
 
 .navbar-toggler {
@@ -195,6 +204,30 @@ body {
 .theme-toggle-btn .icon {
     display: none;
     transition: opacity 0.2s;
+}
+
+/* Navbar Utilities */
+.navbar-user-name {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.navbar-logout-link {
+    display: flex;
+    align-items: center;
+    padding: 0.25rem;
+    color: var(--text-muted);
+    transition: color 0.2s;
+}
+.navbar-logout-link:hover {
+    color: var(--text-heading);
+}
+
+.navbar .vr {
+    height: 1.25rem;
+    opacity: 0.4;
+    color: var(--border);
 }
 
 /* ── Layout ── */

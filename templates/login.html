@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 巡检数据可视化</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        html, body { height: 100%; margin: 0; }
+        .login-wrap {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            padding: 1rem;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 380px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2.5rem 2rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,.25);
+        }
+        .login-card h1 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: .25rem;
+            color: var(--text);
+        }
+        .login-card p {
+            color: var(--text-muted);
+            font-size: .85rem;
+            margin-bottom: 1.5rem;
+        }
+        .login-card label { font-size: .85rem; font-weight: 500; color: var(--text-secondary); }
+        .login-card input {
+            background: var(--bg-input);
+            border: 1px solid var(--border-input);
+            color: var(--text);
+            border-radius: 10px;
+            padding: .6rem .85rem;
+            font-size: .92rem;
+            width: 100%;
+        }
+        .login-card input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--primary-soft);
+        }
+        .login-card .btn-primary {
+            width: 100%;
+            padding: .6rem;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: .95rem;
+        }
+        #login-error {
+            font-size: .82rem;
+            margin-top: .5rem;
+        }
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: .4rem .7rem;
+            font-size: .8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-wrap">
+        <div class="login-card">
+            <h1>巡检数据可视化</h1>
+            <p>使用运维人员账号登录</p>
+            <form id="login-form" onsubmit="return false;">
+                <div class="mb-3">
+                    <label for="username" class="form-label">用户名</label>
+                    <input type="text" id="username" class="form-control" placeholder="输入用户名" autofocus>
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">密码</label>
+                    <input type="password" id="password" class="form-control" placeholder="输入密码">
+                </div>
+                <div id="login-error" class="text-danger"></div>
+                <button type="submit" class="btn btn-primary mt-2" id="login-btn">登录</button>
+            </form>
+        </div>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" title="切换主题">🌓</button>
+
+    <script>
+    document.getElementById('login-form').addEventListener('submit', async () => {
+        const uname = document.getElementById('username').value.trim();
+        const pw = document.getElementById('password').value;
+        const err = document.getElementById('login-error');
+        const btn = document.getElementById('login-btn');
+        if (!uname && !pw) { err.textContent = '请输入用户名和密码'; return; }
+        if (!pw) { err.textContent = '请输入密码'; return; }
+        err.textContent = '';
+        btn.disabled = true;
+        btn.textContent = '登录中...';
+        try {
+            const body = uname ? {username: uname, password: pw} : {password: pw};
+            const resp = await fetch('/api/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                window.location.href = '/';
+            } else {
+                err.textContent = data.error || '登录失败';
+                btn.disabled = false;
+                btn.textContent = '登录';
+            }
+        } catch(e) {
+            err.textContent = '请求失败: ' + e.message;
+            btn.disabled = false;
+            btn.textContent = '登录';
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('login-form').dispatchEvent(new Event('submit'));
+    });
+
+    // 主题切换
+    const html = document.documentElement;
+    const saved = localStorage.getItem('theme');
+    if (saved) html.setAttribute('data-theme', saved);
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+        const cur = html.getAttribute('data-theme');
+        const next = cur === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+    });
+    </script>
+</body>
+</html>

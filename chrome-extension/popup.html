@@ -11,11 +11,21 @@
       <span class="title">巡检截图识别</span>
     </div>
     <div class="header-right">
-      <span class="version">v1.1</span>
+      <span class="version">v1.2</span>
     </div>
   </div>
 
   <div class="content">
+    <div id="loginBanner" class="login-banner hidden">
+      <span>系统需要登录</span>
+      <div class="login-row">
+        <input type="text" id="loginUsername" placeholder="用户名">
+        <input type="password" id="loginPassword" placeholder="密码">
+        <button id="btnLogin" class="btn btn-sm">登录</button>
+      </div>
+      <div id="loginBannerError" class="login-error hidden"></div>
+    </div>
+
     <button id="btnCapture" class="btn btn-primary">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>

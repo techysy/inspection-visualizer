@@ -1,9 +1,6 @@
 import os
 from flask import Flask
-from dotenv import load_dotenv
 from config import config
-
-load_dotenv()
 
 def create_app(config_name='default'):
     app = Flask(__name__)

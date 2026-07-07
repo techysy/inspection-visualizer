@@ -7,7 +7,8 @@ import logging.handlers
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
-from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response, send_file
+from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response, send_file, session
+from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -271,6 +272,150 @@ def _sync_bidirectional(obj_id, dashboard_type_id, session):
 
 
 main = Blueprint('main', __name__)
+
+
+# ──────────────────────── 鉴权 ────────────────────────
+
+PUBLIC_ROUTES = {'login', 'api_login', 'api_auth_status', 'static'}
+ADMIN_ROUTES = {'inspectors', 'inspector_add', 'inspector_edit', 'inspector_delete', 'ocr_admin'}
+
+def _check_request_auth():
+    """检查请求是否已认证（session 或请求体中的 username+password）"""
+    if session.get('logged_in'):
+        return True
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        uname = data.get('username', '').strip()
+        pw = data.get('password', '')
+        if uname and pw:
+            session_local = SessionLocal()
+            try:
+                inspector = session_local.query(Inspector).filter(
+                    Inspector.username == uname
+                ).first()
+                if inspector and inspector.password and check_password_hash(inspector.password, pw):
+                    session['logged_in'] = True
+                    session['inspector_id'] = inspector.id
+                    session['inspector_name'] = inspector.name
+                    session['is_admin'] = inspector.is_admin or False
+                    session.permanent = True
+                    return True
+            finally:
+                session_local.close()
+        # 兼容旧方式：仅 password（无 username）时使用 APP_PASSWORD
+        if not uname and pw:
+            from flask import current_app
+            if pw == current_app.config.get('APP_PASSWORD', ''):
+                session['logged_in'] = True
+                session['inspector_id'] = None
+                session['inspector_name'] = ''
+                session['is_admin'] = True  # APP_PASSWORD 视为管理员
+                session.permanent = True
+                return True
+    return False
+
+
+def _require_inspector():
+    """当前登录的巡检人员信息"""
+    return {
+        'id': session.get('inspector_id'),
+        'name': session.get('inspector_name', ''),
+    }
+
+
+@main.before_request
+def check_auth():
+    """所有路由需要登录（除公开路由外）"""
+    ep = request.endpoint or ''
+    if not ep.startswith('main.'):
+        return None
+    route = ep.split('main.', 1)[1]
+    if route in PUBLIC_ROUTES:
+        return None
+    if _check_request_auth():
+        # 管理员路由检查
+        if route in ADMIN_ROUTES and not session.get('is_admin'):
+            if request.path.startswith('/api/'):
+                return jsonify({'error': '无权限，需要管理员身份'}), 403
+            return redirect(url_for('main.index'))
+        return None
+    if request.path.startswith('/api/'):
+        return jsonify({'error': '未登录', 'login_url': url_for('main.login', _external=True)}), 401
+    return redirect(url_for('main.login'))
+
+
+@main.route('/login', methods=['GET'])
+def login():
+    """登录页面"""
+    if session.get('logged_in'):
+        return redirect(url_for('main.index'))
+    return render_template('login.html')
+
+
+@main.route('/api/login', methods=['POST'])
+def api_login():
+    """API 登录：使用巡检人员用户名+密码"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请提供登录信息'}), 400
+    uname = data.get('username', '').strip()
+    pw = data.get('password', '')
+
+    # 无用户名时尝试旧密码（兼容）
+    if not uname:
+        from flask import current_app
+        if pw == current_app.config.get('APP_PASSWORD', ''):
+            session['logged_in'] = True
+            session['inspector_id'] = None
+            session['inspector_name'] = ''
+            session['is_admin'] = True
+            session.permanent = True
+            return jsonify({'ok': True, 'inspector': None})
+        return jsonify({'error': '密码错误'}), 403
+
+    if not pw:
+        return jsonify({'error': '请输入密码'}), 400
+
+    session_local = SessionLocal()
+    try:
+        inspector = session_local.query(Inspector).filter(
+            Inspector.username == uname
+        ).first()
+        if inspector and inspector.password and check_password_hash(inspector.password, pw):
+            session['logged_in'] = True
+            session['inspector_id'] = inspector.id
+            session['inspector_name'] = inspector.name
+            session['is_admin'] = inspector.is_admin or False
+            session.permanent = True
+            return jsonify({'ok': True, 'inspector': {'id': inspector.id, 'name': inspector.name, 'is_admin': inspector.is_admin or False}})
+        # 无密码时视为未启用登录功能
+        if inspector and not inspector.password:
+            return jsonify({'error': '该人员未设置登录密码，请先联系管理员'}), 403
+        return jsonify({'error': '用户名或密码错误'}), 403
+    finally:
+        session_local.close()
+
+
+@main.route('/api/auth-status', methods=['GET'])
+def api_auth_status():
+    """检查登录状态"""
+    return jsonify({
+        'logged_in': session.get('logged_in', False),
+        'is_admin': session.get('is_admin', False),
+        'inspector': {
+            'id': session.get('inspector_id'),
+            'name': session.get('inspector_name', ''),
+            'is_admin': session.get('is_admin', False),
+        } if session.get('inspector_id') else None
+    })
+
+
+@main.route('/logout')
+def logout():
+    """登出"""
+    session.clear()
+    return redirect(url_for('main.login'))
+
 
 # 设备类型关键词
 DEVICE_TYPES = {
@@ -2388,31 +2533,44 @@ def inspector_add():
     name = request.form.get('name', '').strip()
     team = request.form.get('team', '').strip() or None
     contact = request.form.get('contact', '').strip() or None
+    username = request.form.get('username', '').strip() or None
+    password = request.form.get('password', '').strip() or None
+    is_admin = request.form.get('is_admin') == 'on'
 
     if not name:
         flash('姓名不能为空', 'danger')
         return redirect(url_for('main.inspectors'))
 
-    session = SessionLocal()
+    session_local = SessionLocal()
     try:
-        inspector = Inspector(name=name, team=team, contact=contact)
-        session.add(inspector)
-        session.commit()
+        if username:
+            exists = session_local.query(Inspector).filter(Inspector.username == username).first()
+            if exists:
+                flash(f'登录名 "{username}" 已被使用', 'danger')
+                return redirect(url_for('main.inspectors'))
+        inspector = Inspector(
+            name=name, team=team, contact=contact,
+            username=username,
+            password=generate_password_hash(password) if password else None,
+            is_admin=is_admin
+        )
+        session_local.add(inspector)
+        session_local.commit()
         flash(f'巡检人员 "{name}" 添加成功', 'success')
     except Exception as e:
-        session.rollback()
+        session_local.rollback()
         flash(f'添加失败: {e}', 'danger')
     finally:
-        session.close()
+        session_local.close()
     return redirect(url_for('main.inspectors'))
 
 
 @main.route('/inspectors/edit/<int:inspector_id>', methods=['POST'])
 def inspector_edit(inspector_id):
     """编辑巡检人员"""
-    session = SessionLocal()
+    session_local = SessionLocal()
     try:
-        inspector = session.query(Inspector).get(inspector_id)
+        inspector = session_local.query(Inspector).get(inspector_id)
         if not inspector:
             flash('巡检人员不存在', 'danger')
             return redirect(url_for('main.inspectors'))
@@ -2420,19 +2578,35 @@ def inspector_edit(inspector_id):
         name = request.form.get('name', '').strip()
         team = request.form.get('team', '').strip() or None
         contact = request.form.get('contact', '').strip() or None
+        username = request.form.get('username', '').strip() or None
+        password = request.form.get('password', '').strip() or None
+        is_admin = request.form.get('is_admin') == 'on'
 
         if name:
             inspector.name = name
         inspector.team = team
         inspector.contact = contact
+        inspector.is_admin = is_admin
 
-        session.commit()
+        if username is not None:
+            exists = session_local.query(Inspector).filter(
+                Inspector.username == username, Inspector.id != inspector_id
+            ).first()
+            if exists:
+                flash(f'登录名 "{username}" 已被使用', 'danger')
+                return redirect(url_for('main.inspectors'))
+            inspector.username = username or None
+
+        if password:
+            inspector.password = generate_password_hash(password)
+
+        session_local.commit()
         flash(f'巡检人员 "{inspector.name}" 已更新', 'success')
     except Exception as e:
-        session.rollback()
+        session_local.rollback()
         flash(f'更新失败: {e}', 'danger')
     finally:
-        session.close()
+        session_local.close()
     return redirect(url_for('main.inspectors'))
 
 
@@ -3258,7 +3432,9 @@ def api_save():
         return jsonify({'error': '没有要保存的数据'}), 400
 
     items = data['items']
-    session = SessionLocal()
+    # 用 Flask session 获取当前登录人员（SQLAlchemy session 另用 db 变量避免冲突）
+    _login_inspector_id = dict(session).get('inspector_id')
+    db = SessionLocal()
     saved = 0
     skipped = 0
     skipped_duplicate = 0
@@ -3266,8 +3442,8 @@ def api_save():
     created = 0
     last_object_id = None
     try:
-        all_objects = session.query(InspectionObject).filter_by(status='active').all()
-        all_inspectors = session.query(Inspector).all()
+        all_objects = db.query(InspectionObject).filter_by(status='active').all()
+        all_inspectors = db.query(Inspector).all()
 
         for item in items:
             object_name = item.get('point_name', '').strip() or item.get('object_name', '').strip()
@@ -3289,7 +3465,7 @@ def api_save():
             # 优先使用前端已选择的 point_id（但 device_type 须匹配）
             if front_point_id:
                 try:
-                    obj = session.query(InspectionObject).get(int(front_point_id))
+                    obj = db.query(InspectionObject).get(int(front_point_id))
                     if obj and dashboard_category and obj.device_type and obj.device_type != dashboard_category:
                         logger.info(f'  SAVE: 前端选择对象 device_type={obj.device_type} 与类别 {dashboard_category} 不匹配，忽略')
                         obj = None
@@ -3324,8 +3500,8 @@ def api_save():
                     description=f'OCR自动创建 [{dashboard_type_name or "监控"}] - {status_detail}',
                     status='active'
                 )
-                session.add(obj)
-                session.flush()
+                db.add(obj)
+                db.flush()
                 all_objects.append(obj)
                 created += 1
 
@@ -3334,11 +3510,14 @@ def api_save():
             front_inspector_id = item.get('inspector_id')
             if front_inspector_id:
                 try:
-                    inspector = session.query(Inspector).get(int(front_inspector_id))
+                    inspector = db.query(Inspector).get(int(front_inspector_id))
                 except (ValueError, TypeError):
                     inspector = None
             if not inspector and inspector_name:
                 inspector = _match_inspector(inspector_name, all_inspectors)
+            # 使用当前登录人员
+            if not inspector and _login_inspector_id:
+                inspector = db.query(Inspector).get(_login_inspector_id)
             if not inspector and all_inspectors:
                 inspector = all_inspectors[0]
 
@@ -3362,7 +3541,7 @@ def api_save():
                 timestamp = datetime.now()
 
             # 重复检测：同一对象 + 同一精确时间（同一张图不能重复，但同一天不同图允许）
-            existing_record = session.query(InspectionRecord).filter(
+            existing_record = db.query(InspectionRecord).filter(
                 InspectionRecord.object_id == obj.id,
                 InspectionRecord.timestamp == timestamp
             ).first()
@@ -3389,8 +3568,8 @@ def api_save():
 
             # 自动创建指标配置（如果不存在）
             if parsed_metrics:
-                existing_metrics = {m.key: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
-                existing_names = {m.name: m for m in session.query(ObjectMetric).filter_by(object_id=obj.id).all()}
+                existing_metrics = {m.key: m for m in db.query(ObjectMetric).filter_by(object_id=obj.id).all()}
+                existing_names = {m.name: m for m in db.query(ObjectMetric).filter_by(object_id=obj.id).all()}
                 
                 # 获取 calc_config 用于设置 show_chart 和 max_value
                 calc_config = matched_dtype.get('calc_config', {}) if matched_dtype else {}
@@ -3445,13 +3624,13 @@ def api_save():
                             if fv >= 10000:
                                 unit = 'w'
                                 max_val = max(fv * 1.5, 10000)
-                        session.add(ObjectMetric(
+                        db.add(ObjectMetric(
                             object_id=obj.id, key=mapped_key, name=cn_name or mapped_key, unit=unit,
                             max_value=max_val, show_in_chart=calc_show_chart
                         ))
                         logger.info(f'  SAVE: 自动创建指标配置 key={mapped_key} name={cn_name or mapped_key} max_value={max_val} show_chart={calc_show_chart}')
 
-            threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, session)
+            threshold_result = _check_metrics_thresholds(parsed_metrics, obj.id, db)
             if threshold_result:
                 result = threshold_result
 
@@ -3461,7 +3640,7 @@ def api_save():
                 matched_dtype = next((dt for dt in dashboard_types if dt.get('id') == dashboard_type_id), None)
                 if matched_dtype:
                     result_rules = matched_dtype.get('result_rules', {})
-                    delta_result = _evaluate_delta_rules(parsed_metrics, obj.id, result_rules, session)
+                    delta_result = _evaluate_delta_rules(parsed_metrics, obj.id, result_rules, db)
                     if delta_result:
                         result = delta_result
 
@@ -3475,7 +3654,7 @@ def api_save():
                 notes=notes,
                 timestamp=timestamp
             )
-            session.add(record)
+            db.add(record)
 
             # 计数模式：保存日列表记录
             list_items = item.get('_list_items', [])
@@ -3485,7 +3664,7 @@ def api_save():
                 unique_count = len(list_items)
                 
                 # UPSERT：同一天同一对象更新
-                existing_daily = session.query(DailyListRecord).filter_by(
+                existing_daily = db.query(DailyListRecord).filter_by(
                     object_id=obj.id, date=today, content_type='list'
                 ).first()
                 
@@ -3503,17 +3682,17 @@ def api_save():
                         count=unique_count,
                         raw_count=raw_count
                     )
-                    session.add(daily_record)
+                    db.add(daily_record)
                     logger.info(f'  SAVE: 新增日列表记录 obj_id={obj.id} date={today} count={unique_count}')
 
-            session.commit()
+            db.commit()
             saved += 1
             last_object_id = obj.id
     except Exception as e:
-        session.rollback()
+        db.rollback()
         return jsonify({'error': f'保存失败: {str(e)}'}), 500
     finally:
-        session.close()
+        db.close()
 
     return jsonify({'saved': saved, 'skipped': skipped, 'skipped_duplicate': skipped_duplicate, 'skipped_no_match': skipped_no_match, 'created': created, 'object_id': last_object_id})
 

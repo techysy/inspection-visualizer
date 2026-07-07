@@ -57,6 +57,9 @@ async function processRegion(rect) {
     chrome.action.setBadgeText({ text: '...', tabId: tab.id });
     chrome.action.setBadgeBackgroundColor({ color: '#6366f1', tabId: tab.id });
 
+    // 读取登录信息（跨域 API 需要）
+    const { __authUsername, __authPassword } = await chrome.storage.local.get(['__authUsername', '__authPassword']);
+
     // 调用 OCR API
     const resp = await fetch(API_BASE + '/api/ocr', {
       method: 'POST',
@@ -64,9 +67,18 @@ async function processRegion(rect) {
       body: JSON.stringify({
         image: cropped,
         filename: 'screenshot.png',
-        last_modified: Date.now()
+        last_modified: Date.now(),
+        username: __authUsername || '',
+        password: __authPassword || ''
       })
     });
+    if (resp.status === 401) {
+      chrome.storage.local.set({ __ocrError: '请先在浏览器中登录系统（密码在 .env 中）', __ocrResults: [], __ocrRawLines: [] });
+      chrome.action.setBadgeText({ text: '!' });
+      chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+      return;
+    }
+
     const data = await resp.json();
 
     if (data.error) {

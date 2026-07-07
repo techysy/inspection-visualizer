@@ -3,6 +3,21 @@ import secrets
 import string
 from pathlib import Path
 
+# 先加载 .env 文件（确保环境变量在读 Config 前已设置）
+_env_path = Path(__file__).parent / '.env'
+if _env_path.exists():
+    with open(_env_path, 'r', encoding='utf-8') as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#'):
+                if '=' in _line:
+                    _k, _v = _line.split('=', 1)
+                    _k = _k.strip()
+                    _v = _v.strip().strip('"').strip("'")
+                    if _k not in os.environ:
+                        os.environ[_k] = _v
+
+
 def _gen_default_password():
     """生成随机默认密码"""
     chars = string.ascii_letters + string.digits

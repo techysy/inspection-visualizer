@@ -3,16 +3,23 @@ const API_BASE = 'http://localhost:5001';
 const btnCapture = document.getElementById('btnCapture');
 const btnSave = document.getElementById('btnSave');
 const btnView = document.getElementById('btnView');
+const btnLogin = document.getElementById('btnLogin');
 const actionButtons = document.getElementById('actionButtons');
 const statusEl = document.getElementById('status');
 const resultsEl = document.getElementById('results');
 const rawTextEl = document.getElementById('rawText');
 const previewArea = document.getElementById('previewArea');
 const previewImg = document.getElementById('previewImg');
+const loginBanner = document.getElementById('loginBanner');
+const loginUsername = document.getElementById('loginUsername');
+const loginPassword = document.getElementById('loginPassword');
+const loginBannerError = document.getElementById('loginBannerError');
 
 let currentItems = [];
 let currentFlatItems = [];
 let lastSavedObjectId = null;
+
+function isLoggedIn() { return !!window.__authToken; }
 
 function setStatus(msg, type) {
   statusEl.textContent = msg;
@@ -26,7 +33,88 @@ function clearOcrStorage() {
   chrome.storage.local.remove(['__ocrResults', '__ocrRawLines', '__ocrError', '__ocrPreview']);
 }
 
-// 打开时检查是否有待展示的结果
+// 检查登录状态
+async function checkAuth() {
+  try {
+    const resp = await fetch(API_BASE + '/api/auth-status');
+    const data = await resp.json();
+    if (data.logged_in) {
+      window.__authToken = 'session';
+      hide(loginBanner);
+      return true;
+    }
+  } catch(e) {}
+  // 尝试从 storage 获取保存的登录信息
+  const stored = await chrome.storage.local.get(['__authUsername', '__authPassword']);
+  if (stored.__authUsername && stored.__authPassword) {
+    const ok = await tryLogin(stored.__authUsername, stored.__authPassword);
+    if (ok) return true;
+  }
+  show(loginBanner);
+  return false;
+}
+
+async function tryLogin(username, password) {
+  try {
+    const body = username ? {username: username, password: password} : {password: password};
+    const resp = await fetch(API_BASE + '/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      window.__authToken = password;
+      window.__authUsername = username;
+      chrome.storage.local.set({ __authUsername: username, __authPassword: password });
+      hide(loginBanner);
+      return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
+// 为 API 请求添加用户名/密码参数
+async function apiFetch(url, options) {
+  const body = options.body ? JSON.parse(options.body) : {};
+  if (window.__authToken && window.__authToken !== 'session') {
+    body.password = window.__authToken;
+    if (window.__authUsername) body.username = window.__authUsername;
+  }
+  return fetch(url, {
+    method: options.method || 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+}
+
+btnLogin.addEventListener('click', async () => {
+  const uname = loginUsername.value.trim();
+  const pw = loginPassword.value;
+  loginBannerError.textContent = '';
+  hide(loginBannerError);
+  if (!uname && !pw) { loginBannerError.textContent = '请输入用户名和密码'; show(loginBannerError); return; }
+  if (!pw) { loginBannerError.textContent = '请输入密码'; show(loginBannerError); return; }
+  btnLogin.disabled = true;
+  btnLogin.textContent = '验证中...';
+  const ok = await tryLogin(uname || '', pw);
+  btnLogin.disabled = false;
+  btnLogin.textContent = '登录';
+  if (!ok) {
+    loginBannerError.textContent = '用户名或密码错误';
+    show(loginBannerError);
+  }
+});
+
+// 打开时检查登录状态和待展示的结果
+(async function init() {
+  const loggedIn = await checkAuth();
+  if (!loggedIn) {
+    setStatus('需要登录才能使用', 'warning');
+  }
+  // 后续加载由存储监听处理
+})();
+
 chrome.storage.local.get(['__ocrResults', '__ocrError', '__ocrRawLines', '__ocrPreview'], (data) => {
   if (data.__ocrError) {
     setStatus(data.__ocrError, 'error');
@@ -86,6 +174,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // 点击按钮
 btnCapture.addEventListener('click', async () => {
+  if (!isLoggedIn()) {
+    setStatus('请先登录系统', 'error');
+    show(loginBanner);
+    return;
+  }
   btnCapture.disabled = true;
   btnCapture.innerHTML = '<span class="spinner"></span><span>框选中...</span>';
   setStatus('请在页面上框选区域，松开后自动识别...', 'info');
@@ -211,9 +304,8 @@ btnSave.addEventListener('click', async () => {
   btnSave.disabled = true;
 
   try {
-    const resp = await fetch(API_BASE + '/api/save', {
+    const resp = await apiFetch(API_BASE + '/api/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: currentItems })
     });
     const data = await resp.json();

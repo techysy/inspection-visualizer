@@ -74,6 +74,9 @@ class Inspector(Base):
     name = Column(String(50), nullable=False)  # 姓名
     team = Column(String(50))  # 所属班组/部门
     contact = Column(String(100))  # 联系方式（电话/邮箱）
+    username = Column(String(50), unique=True, nullable=True)  # 登录用户名
+    password = Column(String(200), nullable=True)  # 登录密码（werkzeug hash）
+    is_admin = Column(Boolean, default=False)  # 管理员权限
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     inspection_records = relationship('InspectionRecord', back_populates='inspector')
@@ -132,6 +135,9 @@ def init_db():
             'name': 'VARCHAR(50) NOT NULL DEFAULT \'\'',
             'team': 'VARCHAR(50)',
             'contact': 'VARCHAR(100)',
+            'username': 'VARCHAR(50)',
+            'password': 'VARCHAR(200)',
+            'is_admin': 'BOOLEAN DEFAULT 0',
             'created_at': 'DATETIME',
         },
         'object_metrics': {
