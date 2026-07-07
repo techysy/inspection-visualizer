@@ -277,7 +277,7 @@ main = Blueprint('main', __name__)
 # ──────────────────────── 鉴权 ────────────────────────
 
 PUBLIC_ROUTES = {'login', 'api_login', 'api_auth_status', 'static'}
-ADMIN_ROUTES = {'inspectors', 'inspector_add', 'inspector_edit', 'inspector_delete', 'ocr_admin'}
+ADMIN_ROUTES = {'inspectors', 'inspector_add', 'inspector_edit', 'inspector_delete', 'ocr_admin', 'bulk_import', 'objects', 'object_add', 'object_edit', 'object_delete', 'object_clone'}
 
 def _check_request_auth():
     """检查请求是否已认证（session 或请求体中的 username+password）"""
@@ -1455,30 +1455,30 @@ def api_export_excel():
 @main.route('/')
 def index():
     """首页：巡检对象列表"""
-    session = SessionLocal()
+    _is_admin = session.get('is_admin')
+    _inspector_id = session.get('inspector_id')
+    db = SessionLocal()
     try:
-        objects = session.query(InspectionObject).filter_by(status='active').order_by(InspectionObject.sort_order, InspectionObject.id).all()
+        objects = db.query(InspectionObject).filter_by(status='active').order_by(InspectionObject.sort_order, InspectionObject.id).all()
         # 获取每个对象的最近巡检记录和指标
         object_data = []
         stats = {'total': len(objects), 'normal': 0, 'warning': 0, 'error': 0, 'no_record': 0}
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         
         for obj in objects:
-            latest_record = (
-                session.query(InspectionRecord)
-                .filter_by(object_id=obj.id)
-                .order_by(InspectionRecord.timestamp.desc())
-                .first()
-            )
+            baseq = db.query(InspectionRecord).filter_by(object_id=obj.id)
+            if not _is_admin and _inspector_id:
+                baseq = baseq.filter(InspectionRecord.inspector_id.in_([_inspector_id, None]))
+            latest_record = baseq.order_by(InspectionRecord.timestamp.desc()).first()
             # 获取今天的巡检记录
-            today_record = (
-                session.query(InspectionRecord)
-                .filter(InspectionRecord.object_id == obj.id,
-                        InspectionRecord.timestamp >= today)
-                .first()
-            )
+            today_baseq = db.query(InspectionRecord).filter(
+                InspectionRecord.object_id == obj.id,
+                InspectionRecord.timestamp >= today)
+            if not _is_admin and _inspector_id:
+                today_baseq = today_baseq.filter(InspectionRecord.inspector_id.in_([_inspector_id, None]))
+            today_record = today_baseq.first()
             # 获取指标配置
-            metrics = session.query(ObjectMetric).filter_by(object_id=obj.id).all()
+            metrics = db.query(ObjectMetric).filter_by(object_id=obj.id).all()
             metric_list = [{'key': m.key, 'name': m.name, 'unit': m.unit, 'show_in_chart': m.show_in_chart} for m in metrics]
             
             # 解析最新记录的指标值
@@ -1517,6 +1517,8 @@ def index():
                 'skip_location': skip_location,
                 'sort_order': obj.sort_order or 0,
             })
+        # 有最新记录的在前面，同类设备在一起，再按 sort_order 排序
+        object_data.sort(key=lambda x: (0 if x['latest_record'] else 1, x['object'].device_type or '', x['sort_order']))
         # 收集所有不重复的 device_type 和 location
         all_types = sorted(set(
             obj.device_type for obj in objects if obj.device_type
@@ -1528,26 +1530,26 @@ def index():
                                all_device_types=all_types, all_locations=all_locations,
                                stats=stats)
     finally:
-        session.close()
+        db.close()
 
 
 @main.route('/object/<int:object_id>')
 def object_detail(object_id):
     """巡检对象详情页"""
-    session = SessionLocal()
+    _is_admin = session.get('is_admin')
+    _inspector_id = session.get('inspector_id')
+    db = SessionLocal()
     try:
-        obj = session.query(InspectionObject).filter_by(id=object_id).first()
+        obj = db.query(InspectionObject).filter_by(id=object_id).first()
         if not obj:
             return "巡检对象不存在", 404
 
-        records = (
-            session.query(InspectionRecord)
-            .filter_by(object_id=object_id)
-            .order_by(InspectionRecord.timestamp.desc())
-            .all()
-        )
+        q = db.query(InspectionRecord).filter_by(object_id=object_id)
+        if not _is_admin and _inspector_id:
+            q = q.filter(InspectionRecord.inspector_id.in_([_inspector_id, None]))
+        records = q.order_by(InspectionRecord.timestamp.desc()).all()
 
-        all_inspectors = session.query(Inspector).all()
+        all_inspectors = db.query(Inspector).all()
         default_inspector = all_inspectors[0] if all_inspectors else None
 
         # 统计数据
@@ -1582,7 +1584,7 @@ def object_detail(object_id):
             })
 
         # 获取指标配置
-        object_metrics = session.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
+        object_metrics = db.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
         metrics_config = [
             {
                 'id': m.id, 'key': m.key, 'name': m.name, 'unit': m.unit,
@@ -1605,22 +1607,22 @@ def object_detail(object_id):
             metrics_config=metrics_config
         )
     finally:
-        session.close()
+        db.close()
 
 
 @main.route('/api/inspection_history/<int:object_id>')
 def api_inspection_history(object_id):
     """巡检历史 API"""
-    session = SessionLocal()
+    _is_admin = session.get('is_admin')
+    _inspector_id = session.get('inspector_id')
+    db = SessionLocal()
     try:
-        records = (
-            session.query(InspectionRecord)
-            .filter_by(object_id=object_id)
-            .order_by(InspectionRecord.timestamp.desc())
-            .all()
-        )
+        q = db.query(InspectionRecord).filter_by(object_id=object_id)
+        if not _is_admin and _inspector_id:
+            q = q.filter(InspectionRecord.inspector_id.in_([_inspector_id, None]))
+        records = q.order_by(InspectionRecord.timestamp.desc()).all()
 
-        all_inspectors = session.query(Inspector).all()
+        all_inspectors = db.query(Inspector).all()
 
         data = [
             {
@@ -1637,7 +1639,7 @@ def api_inspection_history(object_id):
 
         return jsonify(data)
     finally:
-        session.close()
+        db.close()
 
 
 @main.route('/api/inspection_history/delete/<int:record_id>', methods=['POST'])

@@ -79,7 +79,6 @@
 
 <div class="row" id="object-list">
     {% for item in object_data %}
-    {% if item.latest_record %}
     <div class="col-md-4 mb-4 object-item"
          data-location="{{ item.object.location or '' }}"
          data-device-type="{{ item.object.device_type or '' }}"
@@ -91,6 +90,7 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start mb-2">
                         <h5 class="card-title" style="font-size: 1rem; margin:0;">{{ item.object.name }}</h5>
+                        {% if item.latest_record %}
                         {% if item.latest_record.result == '正常' %}
                         <span class="badge bg-success" style="font-size:0.72rem;">正常</span>
                         {% elif item.latest_record.result == '异常' %}
@@ -98,11 +98,14 @@
                         {% else %}
                         <span class="badge bg-warning" style="font-size:0.72rem;">需关注</span>
                         {% endif %}
+                        {% else %}
+                        <span class="badge bg-secondary" style="font-size:0.72rem;">未巡检</span>
+                        {% endif %}
                     </div>
                     <div class="film-meta">
                         {% if item.object.location %}<span class="tag-format field-location" style="font-weight:600;">{{ item.object.location }}</span>{% endif %}
                         {% if item.object.device_type %}<span class="field-device_type">{{ item.object.device_type }}</span>{% endif %}
-                        {% if item.latest_record.timestamp %}<span class="field-time" data-ts="{{ item.latest_record.timestamp.isoformat() }}">{{ item.latest_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% endif %}
+                        {% if item.latest_record and item.latest_record.timestamp %}<span class="field-time" data-ts="{{ item.latest_record.timestamp.isoformat() }}">{{ item.latest_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% endif %}
                     </div>
                     {% if item.latest_metrics %}
                     <div class="metrics-preview field-metrics">
@@ -117,7 +120,6 @@
             </div>
         </a>
     </div>
-    {% endif %}
     {% endfor %}
 </div>
 

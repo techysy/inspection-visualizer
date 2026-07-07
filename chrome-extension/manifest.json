@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "巡检截图识别",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "框选页面区域截图并自动OCR识别巡检数据",
   "permissions": [
     "activeTab",

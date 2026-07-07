@@ -46,12 +46,14 @@
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'main.upload' %}active{% endif %}" href="/upload">截图识别</a>
                     </li>
+                    {% if session.get('is_admin') %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'main.bulk_import' %}active{% endif %}" href="/import">导入导出</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'main.objects' %}active{% endif %}" href="/objects">对象管理</a>
                     </li>
+                    {% endif %}
                     {% if session.get('is_admin') %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'main.inspectors' %}active{% endif %}" href="/inspectors">人员管理</a>

@@ -88,7 +88,7 @@ async function apiFetch(url, options) {
   });
 }
 
-btnLogin.addEventListener('click', async () => {
+function doLogin() {
   const uname = loginUsername.value.trim();
   const pw = loginPassword.value;
   loginBannerError.textContent = '';
@@ -97,14 +97,24 @@ btnLogin.addEventListener('click', async () => {
   if (!pw) { loginBannerError.textContent = '请输入密码'; show(loginBannerError); return; }
   btnLogin.disabled = true;
   btnLogin.textContent = '验证中...';
-  const ok = await tryLogin(uname || '', pw);
-  btnLogin.disabled = false;
-  btnLogin.textContent = '登录';
-  if (!ok) {
-    loginBannerError.textContent = '用户名或密码错误';
-    show(loginBannerError);
-  }
+  tryLogin(uname || '', pw).then(function(ok) {
+    btnLogin.disabled = false;
+    btnLogin.textContent = '登录';
+    if (ok) {
+      setStatus('', '');
+      statusEl.classList.add('hidden');
+    } else {
+      loginBannerError.textContent = '用户名或密码错误';
+      show(loginBannerError);
+    }
+  });
+}
+
+loginPassword.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doLogin();
 });
+
+btnLogin.addEventListener('click', doLogin);
 
 // 打开时检查登录状态和待展示的结果
 (async function init() {
@@ -322,11 +332,8 @@ btnSave.addEventListener('click', async () => {
     setStatus(msg, 'success');
 
     // 记录保存的 object_id 用于跳转
-    if (data.saved > 0 && currentItems.length > 0) {
-      const firstItem = currentItems[0];
-      if (firstItem.object_id) {
-        lastSavedObjectId = firstItem.object_id;
-      }
+    if (data.object_id) {
+      lastSavedObjectId = data.object_id;
     }
 
     hide(btnSave);
