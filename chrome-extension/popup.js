@@ -69,6 +69,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (items.length > 0) {
       showResultItems(items);
       show(btnSave);
+      clearOcrStorage();
     } else {
       setStatus('未识别到巡检记录', 'warning');
     }
@@ -130,6 +131,15 @@ function resetCaptureBtn() {
   `;
 }
 
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+function escAttr(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function showResultItems(ocrItems) {
   currentFlatItems = [];
   let html = '';
@@ -156,18 +166,20 @@ function showResultItems(ocrItems) {
         const val = metrics[key];
         const flatIdx = currentFlatItems.length;
         currentFlatItems.push({ metricKey: key, value: val, _itemIdx: itemIdx });
-        html += `
-        <div class="result-item">
-          <div class="result-info">
-            <span class="result-name">${key}</span>
-            <span class="result-val" id="val-${flatIdx}">${val != null ? val : ''}</span>
-          </div>
-          <input class="result-edit" id="edit-${flatIdx}" type="number" step="any"
-            placeholder="${key}"
-            value="${val != null ? val : ''}"
-            data-flat="${flatIdx}"
-            onchange="onEditValue(this)">
-        </div>`;
+        const numVal = val != null ? parseFloat(String(val).replace(/[^0-9.\-]/g, '')) : '';
+        const itemVirtualKeys = item.virtual_keys || [];
+        const isVirtual = itemVirtualKeys.indexOf(key) !== -1;
+        html += '<div class="result-item">' +
+          '<div class="result-info">' +
+          '<span class="result-name">' + escHtml(key) + '</span>' +
+          '<span class="result-val" id="val-' + flatIdx + '">' + (val != null ? escHtml(String(val)) : '') + '</span>' +
+          '</div>';
+        if (isVirtual) {
+          html += '<span style="font-size:0.7rem;color:var(--text-faint);padding:0.25rem 0.5rem;">计算类</span>';
+        } else {
+          html += '<input class="result-edit" id="edit-' + flatIdx + '" type="number" step="any" placeholder="' + escAttr(key) + '" value="' + (numVal !== '' && !isNaN(numVal) ? numVal : '') + '" data-flat="' + flatIdx + '" onchange="onEditValue(this)">';
+        }
+        html += '</div>';
       });
     }
     html += `</div>`;
@@ -184,11 +196,13 @@ window.onEditValue = function(el) {
   const flatIdx = parseInt(el.dataset.flat);
   const val = parseFloat(el.value);
   if (!isNaN(val) && currentFlatItems[flatIdx]) {
-    currentFlatItems[flatIdx].value = val;
+    const original = currentFlatItems[flatIdx].value;
+    const hasPct = typeof original === 'string' && original.trim().endsWith('%');
+    currentFlatItems[flatIdx].value = hasPct ? val + '%' : val;
     const itemIdx = currentFlatItems[flatIdx]._itemIdx;
     const metricKey = currentFlatItems[flatIdx].metricKey;
-    currentItems[itemIdx].metrics[metricKey] = val;
-    document.getElementById('val-' + flatIdx).textContent = val;
+    currentItems[itemIdx].metrics[metricKey] = hasPct ? val + '%' : val;
+    document.getElementById('val-' + flatIdx).textContent = hasPct ? val + '%' : val;
   }
 };
 

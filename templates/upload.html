@@ -184,7 +184,7 @@
             let hasLocationMatch = false;
             const pointName = (p.name || '').toLowerCase();
             const pLocation = (p.location || '').toLowerCase();
-            if (pointName && (name.includes(pointName) || pointName.includes(name))) { score += 20; hasNameMatch = true; }
+            if (pointName && name && (name.includes(pointName) || pointName.includes(name))) { score += 20; hasNameMatch = true; }
             if (location && pLocation && location === pLocation) { score += 30; hasLocationMatch = true; }
             else if (location && pLocation && location.includes(pLocation)) { score += 20; hasLocationMatch = true; }
             else if (location && pLocation && pLocation.includes(location)) { score += 15; hasLocationMatch = true; }

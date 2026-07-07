@@ -125,6 +125,48 @@ def _save_dashboard_types(types_list):
         json.dump({'types': types_list}, f, ensure_ascii=False, indent=2)
     tmp_path.replace(DASHBOARD_TYPES_PATH)
 
+def _get_virtual_metric_keys():
+    """返回所有 dashboard type calc_config 中定义的 result_name 集合（虚拟指标不可删除）"""
+    keys = set()
+    for t in _load_dashboard_types():
+        cfg = t.get('calc_config') or {}
+        if cfg.get('result_name'):
+            keys.add(cfg['result_name'])
+    return keys
+
+def _get_virtual_metric_keys_for_type(dtype):
+    """返回指定 dashboard type 的 calc_config.result_name（仅该类型的虚拟指标）"""
+    cfg = dtype.get('calc_config') or {}
+    if cfg.get('result_name'):
+        return [cfg['result_name']]
+    return []
+
+
+def _sync_virtual_metrics_for_dtype(dtype, session):
+    calc = dtype.get('calc_config')
+    if not calc or not calc.get('result_name'):
+        return
+    result_name = calc.get('result_name')
+    category = dtype.get('category', '')
+    if not category:
+        return
+
+    objects = session.query(InspectionObject).filter(
+        InspectionObject.status == 'active',
+        ((InspectionObject.device_type == category) | InspectionObject.device_type.is_(None))
+    ).all()
+    for obj in objects:
+        existing = session.query(ObjectMetric).filter_by(object_id=obj.id, key=result_name).first()
+        if existing:
+            existing.show_in_chart = calc.get('show_chart', False)
+            existing.max_value = calc.get('max_value')
+        else:
+            session.add(ObjectMetric(
+                object_id=obj.id, key=result_name, name=result_name, unit='',
+                max_value=calc.get('max_value') or 100,
+                show_in_chart=calc.get('show_chart', False)
+            ))
+
 
 def _sync_dashboard_type_from_object(obj, metrics):
     """根据巡检对象及其指标自动创建/更新仪表盘类型"""
@@ -704,11 +746,10 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
                     fmt = calc_config.get('format', 'decimal')
                     result = round(float(result), decimal_places)
                     if fmt == 'percent':
-                        # 百分比格式：存储为小数，显示时乘以100
-                        metrics[target_key] = result
-                        metrics[f'{target_key}_display'] = f'{result * 100:.{decimal_places}f}%'
+                        # 百分比格式：公式为 已用容量/总容量，乘以100并加%
+                        metrics[target_key] = f'{result * 100:.{decimal_places}f}%'
                     else:
-                        metrics[target_key] = result
+                        metrics[target_key] = f'{result}%'
                 elif isinstance(result, float) and result == int(result):
                     result = int(result)
                     metrics[target_key] = result
@@ -793,12 +834,12 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
     if not metrics:
         return None
 
-    # 构建状态详情
+    # 构建状态详情（显示 OCR 原始指标和公式计算结果，不显示 _display）
     reverse_label_map = {v: k for k, v in label_map.items()}
     status_detail_parts = []
     for key, val in metrics.items():
-        if key.startswith('_'):
-            continue  # 跳过临时字段
+        if key.endswith('_display'):
+            continue
         label_name = reverse_label_map.get(key, key)
         status_detail_parts.append(f'{label_name}: {val}')
     if online_rate:
@@ -861,6 +902,13 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
     if name_from_first_line and unmatched_lines:
         point_name = unmatched_lines[0]
         logger.info(f'  PARSE: 从首行提取名称: {point_name}')
+    if not point_name and skip_location:
+        point_name = matched_type.get('name', '')
+        if point_name:
+            logger.info(f'  PARSE: 跳过位置匹配，使用仪表盘名称: {point_name}')
+    if not point_name and region_name:
+        point_name = region_name
+        logger.info(f'  PARSE: point_name 为空，使用位置名称: {point_name}')
 
     result_data = {
         'point_name': point_name,
@@ -876,7 +924,8 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
         'dashboard_type_name': matched_type['name'],
         'dashboard_category': matched_type.get('category', matched_type['name']),
         'skip_location_match': matched_type.get('skip_location_match', False),
-        'metrics': metrics,
+        'metrics': {k: v for k, v in metrics.items() if not k.endswith('_display')},
+        'virtual_keys': _get_virtual_metric_keys_for_type(matched_type),
     }
 
     return result_data
@@ -1644,13 +1693,8 @@ def api_records_compute():
                     else:
                         den_val = _num(m.get(den_key, ''))
                     decimal_places = cfg.get('decimal_places', 2)
-                    fmt = cfg.get('format', 'decimal')
                     if num_val is not None and den_val is not None and den_val != 0:
-                        raw = num_val / den_val
-                        if fmt == 'percent':
-                            result = round(raw * 100, decimal_places)
-                        else:
-                            result = round(raw, decimal_places)
+                        result = round(num_val / den_val * 100, decimal_places)
 
                 elif calc_type == 'difference':
                     minuend_type = cfg.get('minuend_type', 'field')
@@ -1683,9 +1727,27 @@ def api_records_compute():
                                 result = None
 
                 if result is not None:
-                    m[result_name] = result
+                    # 百分比类型自动添加 % 后缀
+                    suffix = '%' if calc_type == 'percentage' else ''
+                    m[result_name] = f'{result}{suffix}'
                     r.metrics = json.dumps(m, ensure_ascii=False)
                     updated += 1
+                    # 确保该对象存在此指标配置（图表用）
+                    existing = session.query(ObjectMetric).filter_by(
+                        object_id=r.object_id, key=result_name
+                    ).first()
+                    if not existing:
+                        show_in_chart = cfg.get('show_chart', False)
+                        max_value = cfg.get('max_value', None)
+                        session.add(ObjectMetric(
+                            object_id=r.object_id,
+                            key=result_name,
+                            name=result_name,
+                            unit='',
+                            max_value=max_value or 100,
+                            show_in_chart=show_in_chart
+                        ))
+                        logger.info(f'  COMPUTE: 自动创建指标配置 key={result_name} show_in_chart={show_in_chart} max_value={max_value}')
 
             total_updated += updated
             results_summary.append(f'{result_name}: {updated} 条')
@@ -1990,6 +2052,7 @@ def api_object_metrics_list(object_id):
     session = SessionLocal()
     try:
         metrics = session.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
+        virtual_keys = _get_virtual_metric_keys()
         return jsonify([
             {
                 'id': m.id,
@@ -2002,6 +2065,7 @@ def api_object_metrics_list(object_id):
                 'warn_threshold': m.warn_threshold,
                 'error_threshold': m.error_threshold,
                 'threshold_direction': m.threshold_direction,
+                'is_virtual': m.key in virtual_keys,
             }
             for m in metrics
         ])
@@ -2028,6 +2092,16 @@ def api_object_metrics_add(object_id):
         return jsonify({'error': 'key 和 name 不能为空'}), 400
     session = SessionLocal()
     try:
+        # 检查 key 是否已存在
+        existing = session.query(ObjectMetric).filter_by(object_id=object_id, key=key).first()
+        if existing:
+            session.close()
+            return jsonify({'error': f'key "{key}" 已存在，请使用其他名称'}), 409
+        # 不允许手动添加虚拟指标 key
+        virtual_keys = _get_virtual_metric_keys()
+        if key in virtual_keys:
+            session.close()
+            return jsonify({'error': f'key "{key}" 为计算类指标，由仪表盘类型自动管理'}), 400
         metric = ObjectMetric(
             object_id=object_id, key=key, name=name,
             unit=unit, max_value=max_value, show_in_chart=show_in_chart, sort_order=sort_order,
@@ -2052,15 +2126,21 @@ def api_object_metrics_update(object_id, metric_id):
         metric = session.query(ObjectMetric).filter_by(id=metric_id, object_id=object_id).first()
         if not metric:
             return jsonify({'error': '指标不存在'}), 404
-        if 'key' in data:
-            metric.key = data['key']
-        if 'name' in data:
-            metric.name = data['name']
-        if 'unit' in data:
-            metric.unit = data['unit']
-        if 'show_in_chart' in data:
+        # 虚拟指标保护（来自 calc_config 的计算结果）
+        virtual_keys = _get_virtual_metric_keys()
+        is_virtual = metric.key in virtual_keys
+        if is_virtual:
+            # 只允许编辑阈值和排序，不允许编辑基础配置
+            allowed = {'sort_order', 'warn_threshold', 'error_threshold', 'threshold_direction'}
+            forbidden = set(data.keys()) - allowed
+            if forbidden:
+                return jsonify({'error': f'计算类指标仅可编辑阈值和排序，不允许修改: {", ".join(forbidden)}'}), 400
+        for field in ('key', 'name', 'unit'):
+            if field in data and not is_virtual:
+                setattr(metric, field, data[field])
+        if 'show_in_chart' in data and not is_virtual:
             metric.show_in_chart = data['show_in_chart']
-        if 'max_value' in data:
+        if 'max_value' in data and not is_virtual:
             metric.max_value = data['max_value']
         if 'sort_order' in data:
             metric.sort_order = data['sort_order']
@@ -2103,6 +2183,11 @@ def api_object_metrics_delete(object_id, metric_id):
         metric = session.query(ObjectMetric).filter_by(id=metric_id, object_id=object_id).first()
         if not metric:
             return jsonify({'error': '指标不存在'}), 404
+
+        # 保护虚拟指标（来自 calc_config 的计算结果）
+        virtual_keys = _get_virtual_metric_keys()
+        if metric.key in virtual_keys:
+            return jsonify({'error': '计算类指标不可删除，如需移除请在仪表盘类型管理页面移除计算配置'}), 400
 
         metric_name = metric.name
         metric_key = metric.key
@@ -2609,13 +2694,19 @@ def api_ocr():
         image_bytes = base64.b64decode(image_data)
         img = Image.open(io.BytesIO(image_bytes))
         img_height = img.height
+        img_width = img.width
+        logger.info(f'  IMAGE: 原始图片尺寸 {img_width}x{img_height}, 格式 {img.format}, 模式 {img.mode}')
         top_cutoff = int(img_height * ignore_top / 100) if ignore_top > 0 else 0
         bottom_cutoff = img_height - int(img_height * ignore_bottom / 100) if ignore_bottom > 0 else img_height
 
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             img.save(tmp.name)
             tmp_path = tmp.name
+        import time as _time
+        t0 = _time.time()
         result, _ = ocr_engine(tmp_path)
+        elapsed = _time.time() - t0
+        logger.info(f'  IMAGE: OCR耗时 {elapsed:.2f}s, 结果条数 {len(result) if result else 0}')
         Path(tmp_path).unlink(missing_ok=True)
     except Exception as e:
         return jsonify({'error': f'图片处理失败: {str(e)}'}), 400
@@ -2641,7 +2732,10 @@ def api_ocr():
             else:
                 item['file_creation_time'] = creation_time.strftime('%Y-%m-%d %H:%M')
 
-    return jsonify({'items': items, 'raw_lines': [item[1] for item in filtered_result if item]})
+    return jsonify({
+        'items': items,
+        'raw_lines': [item[1] for item in filtered_result if item],
+    })
 
 
 @main.route('/ocr-admin')
@@ -2818,9 +2912,10 @@ def api_dashboard_types_add():
     }
     types_list.append(new_type)
     _save_dashboard_types(types_list)
-    # 双向同步
+    # 双向同步 + 虚拟指标同步
     try:
         session = SessionLocal()
+        _sync_virtual_metrics_for_dtype(new_type, session)
         obj = session.query(InspectionObject).filter_by(name=new_type['name'], status='active').first()
         if not obj and new_id.startswith('obj_'):
             try:
@@ -2829,7 +2924,7 @@ def api_dashboard_types_add():
                 pass
         if obj:
             _sync_bidirectional(obj.id, new_id, session)
-            session.commit()
+        session.commit()
         session.close()
     except Exception as e:
         logger.error(f'  SYNC: 新增类型同步失败: {e}')
@@ -2860,9 +2955,10 @@ def api_dashboard_types_update(type_id):
                 'skip_location_match': data.get('skip_location_match', t.get('skip_location_match', False)),
             })
             _save_dashboard_types(types_list)
-            # 双向同步
+            # 双向同步 + 虚拟指标同步
             try:
                 session = SessionLocal()
+                _sync_virtual_metrics_for_dtype(types_list[i], session)
                 obj = session.query(InspectionObject).filter_by(name=types_list[i]['name'], status='active').first()
                 if not obj and type_id.startswith('obj_'):
                     try:
@@ -2871,7 +2967,7 @@ def api_dashboard_types_update(type_id):
                         pass
                 if obj:
                     _sync_bidirectional(obj.id, type_id, session)
-                    session.commit()
+                session.commit()
                 session.close()
             except Exception as e:
                 logger.error(f'  SYNC: 更新类型同步失败: {e}')
@@ -3123,13 +3219,19 @@ def api_ocr_test():
         image_bytes = base64.b64decode(image_data)
         img = Image.open(io.BytesIO(image_bytes))
         img_height = img.height
+        img_width = img.width
+        logger.info(f'  IMAGE: (test) 原始图片尺寸 {img_width}x{img_height}, 格式 {img.format}, 模式 {img.mode}')
         top_cutoff = int(img_height * ignore_top / 100) if ignore_top > 0 else 0
         bottom_cutoff = img_height - int(img_height * ignore_bottom / 100) if ignore_bottom > 0 else img_height
 
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             img.save(tmp.name)
             tmp_path = tmp.name
+        import time as _time
+        t0 = _time.time()
         result, _ = ocr_engine(tmp_path)
+        elapsed = _time.time() - t0
+        logger.info(f'  IMAGE: (test) OCR耗时 {elapsed:.2f}s, 结果条数 {len(result) if result else 0}')
         Path(tmp_path).unlink(missing_ok=True)
     except Exception as e:
         return jsonify({'error': f'图片处理失败: {str(e)}'}), 400
@@ -3188,7 +3290,7 @@ def api_save():
             if front_point_id:
                 try:
                     obj = session.query(InspectionObject).get(int(front_point_id))
-                    if obj and dashboard_category and (obj.device_type or '') != dashboard_category:
+                    if obj and dashboard_category and obj.device_type and obj.device_type != dashboard_category:
                         logger.info(f'  SAVE: 前端选择对象 device_type={obj.device_type} 与类别 {dashboard_category} 不匹配，忽略')
                         obj = None
                 except (ValueError, TypeError):
@@ -3201,11 +3303,6 @@ def api_save():
             # 仪表盘格式：按位置匹配（跳过位置匹配时不执行）
             if not obj and is_dashboard and location and not skip_location:
                 obj = _match_object_by_location(location, all_objects, expected_type=dashboard_category)
-            
-            # 仪表盘格式：如果没有位置匹配，尝试按仪表盘类型匹配
-            if not obj and is_dashboard:
-                match_type = dashboard_category or '监控'
-                obj = _match_object_by_type(match_type, all_objects)
             
             # 如果还是没有匹配，创建新对象
             if not obj:
@@ -3301,7 +3398,7 @@ def api_save():
                 
                 for key, val in parsed_metrics.items():
                     try:
-                        fv = float(val)
+                        fv = float(str(val).rstrip('%'))
                     except (ValueError, TypeError):
                         continue
                     # 用中文标签对应的短key去匹配已有指标
@@ -3429,14 +3526,16 @@ def _match_object(name, all_objects, expected_type=None):
     expected_lower = expected_type.lower() if expected_type else None
 
     for obj in all_objects:
-        if expected_lower and (obj.device_type or '').lower() != expected_lower:
+        if expected_lower and obj.device_type and obj.device_type.lower() != expected_lower:
             continue
         score = 0
+        has_name_match = False
         obj_name_lower = (obj.name or '').lower()
         location_lower = (obj.location or '').lower()
 
         if obj_name_lower and (obj_name_lower in name_lower or name_lower in obj_name_lower):
             score += 20
+            has_name_match = True
         if location_lower and location_lower in name_lower:
             score += 10
         if obj.device_type:
@@ -3444,13 +3543,11 @@ def _match_object(name, all_objects, expected_type=None):
             if dtype_lower in name_lower:
                 score += 5
 
-        if score > best_score:
+        if has_name_match and score > best_score:
             best_score = score
             best = obj
 
-    if best and best_score >= 10:
-        return best
-    return None
+    return best
 
 
 def _match_object_by_location(location, all_objects, expected_type=None):
@@ -3464,31 +3561,29 @@ def _match_object_by_location(location, all_objects, expected_type=None):
     expected_lower = expected_type.lower() if expected_type else None
 
     for obj in all_objects:
-        if expected_lower and (obj.device_type or '').lower() != expected_lower:
+        if expected_lower and obj.device_type and obj.device_type.lower() != expected_lower:
             continue
         score = 0
+        has_location_match = False
         obj_location_lower = (obj.location or '').lower()
-        obj_name_lower = (obj.name or '').lower()
 
         # 位置完全匹配
         if obj_location_lower and obj_location_lower == location_lower:
             score += 30
+            has_location_match = True
         # 位置包含匹配
         elif obj_location_lower and location_lower in obj_location_lower:
             score += 20
+            has_location_match = True
         elif obj_location_lower and obj_location_lower in location_lower:
             score += 15
-        # 名称包含位置
-        elif obj_name_lower and location_lower in obj_name_lower:
-            score += 10
+            has_location_match = True
 
-        if score > best_score:
+        if has_location_match and score > best_score:
             best_score = score
             best = obj
 
-    if best and best_score >= 15:
-        return best
-    return None
+    return best
 
 
 def _match_object_by_type(device_type, all_objects):

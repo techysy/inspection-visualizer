@@ -105,13 +105,14 @@
       "category": "服务器",
       "description": "录像机仪表盘",
       "detect_keywords": [
-        "存储池",
         "录像服务器",
-        "录像池"
+        "录像池",
+        "存储池"
       ],
       "labels": {
         "已用容量": "已用容量",
-        "总容量": "总容量"
+        "总容量": "总容量",
+        "已使用": "已使用"
       },
       "formulas": {
         "已使用": "已用容量/总容量"
@@ -125,7 +126,7 @@
         "decimal_places": 2,
         "format": "percent",
         "show_chart": true,
-        "max_value": 1
+        "max_value": 100
       },
       "extra_labels": [
         "_pct_config"

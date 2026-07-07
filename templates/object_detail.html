@@ -290,7 +290,8 @@
         var n = parseFloat(raw);
         if (isNaN(n)) return raw;
         if (mc.unit === 'w') return (n / 10000) + 'w';
-        return n + (mc.unit || '');
+        var suffix = typeof raw === 'string' && raw.endsWith('%') ? '%' : (mc.unit || '');
+        return n + suffix;
     }
 
     function loadInspectionHistory() {
@@ -406,6 +407,11 @@
                 if (num !== null && mv !== null && num > mv) return null;
                 return num;
             });
+            var hasPercent = dataRev.some(function(item) {
+                var m = item.metrics || {};
+                var val = m[mc.name] || m[mc.key];
+                return typeof val === 'string' && val.trim().endsWith('%');
+            });
 
             var palette = ['#6366f1','#22c55e','#ef4444','#f59e0b','#06b6d4','#ec4899'];
             var color = palette[metricsConfig.indexOf(mc) % palette.length];
@@ -444,7 +450,7 @@
                             suggestedMin: 0,
                             suggestedMax: (function(){ var m = mc.max_value ? parseFloat(mc.max_value) : null; if (m === null) return undefined; return m * 1.1; })(),
                             grid: { color: cv('--grid-line'), drawBorder: false },
-                            ticks: { color: cv('--text-dim'), font: { size: 10 }, callback: function(v) { var mv = mc.max_value ? parseFloat(mc.max_value) : null; if (mc.unit === 'w') { mv = mv ? mv / 10000 : null; return v + 'w'; } if (mv !== null && v > mv) return ''; return v; } }
+                            ticks: { color: cv('--text-dim'), font: { size: 10 }, callback: function(v) { var mv = mc.max_value ? parseFloat(mc.max_value) : null; if (mc.unit === 'w') { mv = mv ? mv / 10000 : null; return v + 'w'; } if (mv !== null && v > mv) return ''; return v + (hasPercent ? '%' : ''); } }
                         }
                     },
                     plugins: {
@@ -459,7 +465,7 @@
                             cornerRadius: 8,
                             callbacks: {
                                 title: function(items) { return items.length ? items[0].label : ''; },
-                                label: function(c) { return mc.name + ': ' + (mc.unit === 'w' ? c.parsed.y + 'w' : c.parsed.y + (mc.unit || '')); }
+                                label: function(c) { var suf = hasPercent ? '%' : (mc.unit === 'w' ? 'w' : ''); return mc.name + ': ' + c.parsed.y + suf; }
                             }
                         }
                     }

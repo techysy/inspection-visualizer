@@ -1,5 +1,30 @@
 # 📋 更新日志
 
+## [2.7.0] - 2026-07-07
+
+### ✨ 新增
+
+- **虚拟指标管理**：仪表盘类型的 `calc_config` 自动创建/同步虚拟 `ObjectMetric`，不可删除仅可编辑阈值
+- **虚拟指标按类型过滤**：`calc_config.result_name` 仅标记当前类型的虚拟指标，避免跨类型误标
+- **OCR 诊断日志**：图片尺寸、OCR 耗时、结果条数等调试信息
+
+### 🐛 修复
+
+- **Chrome 扩展 Service Worker**：`cropImage` 中 `FileReader` 不可用，改为 `arrayBuffer` + 分块 `btoa` 编码
+- **弹窗 JS 语法错误**：`popup.js` 中 `showResultItems` 外层 `forEach` 缺失闭合 `});`，导致整个脚本不执行
+- **上传识别空结果**：OCR 对上传截图返回空（60ms），添加日志诊断图片尺寸过小问题
+- **前端自动匹配**：`point_name` 为空但有 `region_name` 时，自动用位置名作为 `point_name`，确保 `hasNameMatch` 为 true
+- **百分比值编辑**：弹窗中百分比输入框用 `parseFloat.replace` 提取数字，编辑后保留 `%` 后缀
+- **对象格式公式**：`{expr, decimal_places, suffix}` 格式后缀 `%` 正确存储为 `"66.73%"`
+- **`ObjectMetric` 创建异常**：`float()` 前先 `rstrip('%')`，避免百分比值转换失败
+- **日志轮转命名**：`log_handler.namer` 使轮转文件名扩展名在日期后
+
+### 🔧 优化
+
+- **Chrome 扩展快捷键**：新增 `Ctrl+Shift+S` 快速启动框选截图
+- **仪表盘类型保存**：保存时自动同步虚拟指标，原子写入 `dashboard_types.json`
+- **详情页 `%` 显示**：`fmtVal` 保留 `%` 后缀，图表 Y 轴/tooltip 添加 `%`
+
 ## [2.6.0] - 2026-07-06
 
 ### ✨ 新增

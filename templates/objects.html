@@ -625,9 +625,11 @@ function loadMetrics(objectId) {
                     '<span class="metric-drag-handle" style="cursor:grab;color:var(--text-muted);font-size:10px;opacity:0.4;">⋮⋮</span>' +
                     '<span style="flex:1;">' + escHtml(m.name) + ' <span style="color:var(--text-faint);font-size:0.7rem;">(' + escHtml(m.key) + (m.unit ? '/' + escHtml(m.unit) : '') + ')' + (m.max_value ? ' max:' + m.max_value : '') + '</span></span>' +
                     '<label style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:0.25rem;cursor:pointer;">' +
-                    '<input type="checkbox" ' + (m.show_in_chart ? 'checked' : '') + ' onchange="toggleChart(' + objectId + ',' + m.id + ',this.checked)" style="cursor:pointer;"> 图表</label>' +
-                    '<button onclick="editMetric(' + objectId + ',' + m.id + ')" style="border:none;background:none;color:var(--accent);cursor:pointer;font-size:0.72rem;padding:0.1rem 0.3rem;">编辑</button>' +
-                    '<button onclick="deleteMetric(' + objectId + ',' + m.id + ')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:0.75rem;padding:0.1rem 0.3rem;">&times;</button>' +
+                    '<input type="checkbox" ' + (m.show_in_chart ? 'checked' : '') + (m.is_virtual ? ' disabled title="计算类指标图表设置由仪表盘类型管理"' : '') + ' onchange="toggleChart(' + objectId + ',' + m.id + ',this.checked)" style="cursor:pointer;"> 图表</label>' +
+                    (m.is_virtual
+                        ? '<span style="color:var(--text-faint);font-size:0.72rem;padding:0.1rem 0.3rem;">计算类</span>'
+                        : '<button onclick="editMetric(' + objectId + ',' + m.id + ')" style="border:none;background:none;color:var(--accent);cursor:pointer;font-size:0.72rem;padding:0.1rem 0.3rem;">编辑</button>' +
+                          '<button onclick="deleteMetric(' + objectId + ',' + m.id + ')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:0.75rem;padding:0.1rem 0.3rem;">&times;</button>') +
                     '</div>';
             });
             listEl.innerHTML = html;

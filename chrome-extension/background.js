@@ -123,11 +123,14 @@ async function cropImage(dataUrl, rect) {
   ctx.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
   bitmap.close();
 
-  // → dataUrl
+  // → dataUrl (base64编码，避免 FileReader 在 Service Worker 中不可用)
   const resultBlob = await canvas.convertToBlob({ type: 'image/png' });
-  const reader = new FileReader();
-  return new Promise((resolve) => {
-    reader.onloadend = () => resolve(reader.result);
-    reader.readAsDataURL(resultBlob);
-  });
+  const buffer = await resultBlob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return 'data:image/png;base64,' + btoa(binary);
 }
