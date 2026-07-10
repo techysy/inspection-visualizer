@@ -48,11 +48,14 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="filter-section">
         <div class="filter-label">位置</div>
-        <div class="filter-bar">
+        <div class="filter-bar" id="location-bar">
             <button class="filter-btn active" data-filter="all" data-group="location">全部</button>
             {% for loc in all_locations %}
-            <button class="filter-btn" data-filter="{{ loc }}" data-group="location">{{ loc }}</button>
+            <button class="filter-btn loc-btn" data-filter="{{ loc }}" data-group="location" {% if loop.index > 3 %}style="display:none;"{% endif %}>{{ loc }}</button>
             {% endfor %}
+            {% if all_locations|length > 3 %}
+            <button class="filter-btn loc-more-btn" onclick="toggleMoreLocations(this)">更多</button>
+            {% endif %}
         </div>
     </div>
     <div class="dropdown">
@@ -77,48 +80,76 @@
     </div>
 </div>
 
+{% set type_groups = {} %}
+{% for item in object_data %}
+    {% set dt = item.object.device_type or '其他' %}
+    {% if dt not in type_groups %}
+        {% set _ = type_groups.update({dt: []}) %}
+    {% endif %}
+    {% set _ = type_groups[dt].append(item) %}
+{% endfor %}
+
+{% set sorted_types = [] %}
+{% for dt in type_groups %}
+    {% set _ = sorted_types.append((dt, type_groups[dt]|length)) %}
+{% endfor %}
+{% set sorted_types = sorted_types|sort(attribute='1', reverse=true) %}
+
 <div class="row" id="object-list">
-    {% for item in object_data %}
-    <div class="col-md-4 mb-4 object-item"
-         data-location="{{ item.object.location or '' }}"
-         data-device-type="{{ item.object.device_type or '' }}"
-         data-name="{{ item.object.name or '' }}"
-         data-skip-location="{{ 'true' if item.skip_location else 'false' }}"
-         data-sort-order="{{ item.sort_order }}">
-        <a href="/object/{{ item.object.id }}" class="text-decoration-none" style="color: inherit;">
-            <div class="card film-card {% if not item.today_record %}card-no-inspect{% endif %}">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <h5 class="card-title" style="font-size: 1rem; margin:0;">{{ item.object.name }}</h5>
-                        {% if item.latest_record %}
-                        {% if item.latest_record.result == '正常' %}
-                        <span class="badge bg-success" style="font-size:0.72rem;">正常</span>
-                        {% elif item.latest_record.result == '异常' %}
-                        <span class="badge bg-danger" style="font-size:0.72rem;">异常</span>
-                        {% else %}
-                        <span class="badge bg-warning" style="font-size:0.72rem;">需关注</span>
-                        {% endif %}
-                        {% else %}
-                        <span class="badge bg-secondary" style="font-size:0.72rem;">未巡检</span>
-                        {% endif %}
-                    </div>
-                    <div class="film-meta">
-                        {% if item.object.location %}<span class="tag-format field-location" style="font-weight:600;">{{ item.object.location }}</span>{% endif %}
-                        {% if item.object.device_type %}<span class="field-device_type">{{ item.object.device_type }}</span>{% endif %}
-                        {% if item.latest_record and item.latest_record.timestamp %}<span class="field-time" data-ts="{{ item.latest_record.timestamp.isoformat() }}">{{ item.latest_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% endif %}
-                    </div>
-                    {% if item.latest_metrics %}
-                    <div class="metrics-preview field-metrics">
-                        {% for key, val in item.latest_metrics.items() %}
-                            {% if not key.startswith('_') and key != 'total' and key != 'online' and key != 'offline' and key != 'undetected' %}
-                            <span class="metric-val">{{ key }}: {{ val }}</span>
+    {% for dt, count in sorted_types %}
+    <div class="type-group" data-type="{{ dt }}">
+        <div class="type-group-header">
+            <span class="type-group-title">{{ dt }}</span>
+            <span class="type-group-count">{{ count }}</span>
+            {% if count > 3 %}
+            <button class="type-expand-btn" onclick="toggleTypeGroup(this)">展开全部</button>
+            {% endif %}
+        </div>
+        <div class="row type-group-cards">
+            {% for item in type_groups[dt] %}
+            <div class="col-lg-4 mb-3 object-item {% if loop.index > 3 %}type-extra{% endif %}"
+                 data-location="{{ item.object.location or '' }}"
+                 data-device-type="{{ item.object.device_type or '' }}"
+                 data-name="{{ item.object.name or '' }}"
+                 data-skip-location="{{ 'true' if item.skip_location else 'false' }}"
+                 data-sort-order="{{ item.sort_order }}">
+                <a href="/object/{{ item.object.id }}" class="text-decoration-none" style="color: inherit;">
+                    <div class="card film-card {% if not item.today_record %}card-no-inspect{% endif %}">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h5 class="card-title" style="font-size: 0.95rem; margin:0;">{{ item.object.name }}</h5>
+                                {% if item.latest_record %}
+                                {% if item.latest_record.result == '正常' %}
+                                <span class="badge bg-success" style="font-size:0.72rem;">正常</span>
+                                {% elif item.latest_record.result == '异常' %}
+                                <span class="badge bg-danger" style="font-size:0.72rem;">异常</span>
+                                {% else %}
+                                <span class="badge bg-warning" style="font-size:0.72rem;">需关注</span>
+                                {% endif %}
+                                {% else %}
+                                <span class="badge bg-secondary" style="font-size:0.72rem;">未巡检</span>
+                                {% endif %}
+                            </div>
+                            <div class="film-meta">
+                                {% if item.object.location %}<span class="tag-format field-location" style="font-weight:600;">{{ item.object.location }}</span>{% endif %}
+                                {% if item.object.device_type %}<span class="field-device_type">{{ item.object.device_type }}</span>{% endif %}
+                                {% if item.latest_record and item.latest_record.timestamp %}<span class="field-time" data-ts="{{ item.latest_record.timestamp.isoformat() }}">{{ item.latest_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% endif %}
+                            </div>
+                            {% if item.latest_metrics %}
+                            <div class="metrics-preview field-metrics">
+                                {% for key, val in item.latest_metrics.items() %}
+                                    {% if not key.startswith('_') and key != 'total' and key != 'online' and key != 'offline' and key != 'undetected' %}
+                                    <span class="metric-val">{{ key }}: {{ val }}</span>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
                             {% endif %}
-                        {% endfor %}
+                        </div>
                     </div>
-                    {% endif %}
-                </div>
+                </a>
             </div>
-        </a>
+            {% endfor %}
+        </div>
     </div>
     {% endfor %}
 </div>
@@ -149,7 +180,7 @@
         background: var(--bg-elevated);
         border: 1px solid var(--border);
         border-radius: 12px;
-        padding: 0.75rem 1.5rem;
+        padding: 0.6rem 1.2rem;
     }
     .stat-item {
         display: flex;
@@ -176,22 +207,28 @@
     .stat-warning .stat-num { color: #f59e0b; }
     .stat-error .stat-num { color: var(--danger); }
     .stat-norecord .stat-num { color: var(--text-muted); }
+    .card .card-body {
+        padding: 1rem;
+    }
     .card-no-inspect {
         border-left: 3px solid #f59e0b !important;
     }
     .metrics-preview {
         margin-top: 0.5rem;
         display: flex;
-        flex-wrap: wrap;
         gap: 0.3rem;
+        overflow: hidden;
+        white-space: nowrap;
     }
     .metric-val {
-        font-size: 0.68rem;
-        color: var(--text-secondary);
+        font-size: 0.75rem;
+        color: var(--text);
         background: var(--bg-input);
-        padding: 0.12rem 0.4rem;
+        border: 1px solid var(--border);
+        padding: 0.15rem 0.45rem;
         border-radius: 4px;
         white-space: nowrap;
+        flex-shrink: 0;
     }
     .filter-section {
         display: flex;
@@ -275,6 +312,48 @@
         z-index: 9999;
         padding: 1rem;
     }
+    .type-group {
+        margin-bottom: 1.5rem;
+    }
+    .type-group-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+    .type-group-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-heading);
+    }
+    .type-group-count {
+        font-size: 0.72rem;
+        font-weight: 500;
+        padding: 0.1rem 0.45rem;
+        border-radius: 10px;
+        background: var(--primary-soft);
+        color: var(--accent);
+    }
+    .type-expand-btn {
+        font-size: 0.75rem;
+        color: var(--accent);
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.1rem 0.3rem;
+        margin-left: auto;
+    }
+    .type-expand-btn:hover {
+        text-decoration: underline;
+    }
+    .type-extra {
+        display: none;
+    }
+    .type-expanded .type-extra {
+        display: block;
+    }
 </style>
 
 <script>
@@ -282,6 +361,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var locationBtns = document.querySelectorAll('.filter-btn[data-group="location"]');
     var typeBtns = document.querySelectorAll('.filter-btn[data-group="device_type"]');
     var items = document.querySelectorAll('.object-item');
+    var groups = document.querySelectorAll('.type-group');
     var emptyFilter = document.getElementById('empty-filter');
     var objectList = document.getElementById('object-list');
 
@@ -290,14 +370,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function applyFilters() {
         var visible = 0;
-        items.forEach(function(item) {
-            var loc = item.getAttribute('data-location');
-            var dtype = item.getAttribute('data-device-type');
-            var showLoc = activeLocation === 'all' || loc === activeLocation;
-            var showType = activeType === 'all' || dtype === activeType;
-            var show = showLoc && showType;
-            item.style.display = show ? '' : 'none';
-            if (show) visible++;
+        groups.forEach(function(group) {
+            var groupVisible = 0;
+            group.querySelectorAll('.object-item').forEach(function(item) {
+                var loc = item.getAttribute('data-location');
+                var dtype = item.getAttribute('data-device-type');
+                var showLoc = activeLocation === 'all' || loc === activeLocation;
+                var showType = activeType === 'all' || dtype === activeType;
+                var show = showLoc && showType;
+                item.style.display = show ? '' : 'none';
+                if (show) { groupVisible++; visible++; }
+            });
+            group.style.display = groupVisible === 0 ? 'none' : '';
         });
         emptyFilter.style.display = visible === 0 ? '' : 'none';
         objectList.style.display = visible === 0 ? 'none' : '';
@@ -317,6 +401,13 @@ document.addEventListener('DOMContentLoaded', function() {
             typeBtns.forEach(function(b) { b.classList.remove('active'); });
             btn.classList.add('active');
             activeType = btn.getAttribute('data-filter');
+            if (activeType !== 'all') {
+                groups.forEach(function(g) { g.classList.add('type-expanded'); });
+                document.querySelectorAll('.type-expand-btn').forEach(function(b) { b.textContent = '收起'; });
+            } else {
+                groups.forEach(function(g) { g.classList.remove('type-expanded'); });
+                document.querySelectorAll('.type-expand-btn').forEach(function(b) { b.textContent = '展开全部'; });
+            }
             applyFilters();
         });
     });
@@ -459,5 +550,24 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     updateRelativeTime();
 });
+
+function toggleTypeGroup(btn) {
+    var group = btn.closest('.type-group');
+    group.classList.toggle('type-expanded');
+    btn.textContent = group.classList.contains('type-expanded') ? '收起' : '展开全部';
+}
+
+function toggleMoreLocations(btn) {
+    var bar = document.getElementById('location-bar');
+    var hidden = bar.querySelectorAll('.loc-btn[style*="display: none"]');
+    var expanded = hidden.length === 0;
+    if (expanded) {
+        bar.querySelectorAll('.loc-btn').forEach(function(b, i) { if (i >= 3) b.style.display = 'none'; });
+        btn.textContent = '更多';
+    } else {
+        bar.querySelectorAll('.loc-btn').forEach(function(b) { b.style.display = ''; });
+        btn.textContent = '收起';
+    }
+}
 </script>
 {% endblock %}

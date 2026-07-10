@@ -794,7 +794,7 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
         for label in sorted_labels:
             # 构建搜索模式：标签后跟可选分隔符 + 数值 + 可选单位
             # 支持格式：标签 数字、标签：数字、标签(数字)、标签（数字）
-            sep = r'[(\（]?\s*[·.:：]?\s*'
+            sep = r'\s*[(\（]?\s*[·.:：]?\s*'
             end = r'\s*[)\）]?'
             search_pattern = rf'{re.escape(label)}{sep}([\d.]+){end}\s*([万亿]?)'
             if number_before_label:
@@ -807,10 +807,11 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
                     matched_val = int(float(raw) * 10000)
                 elif unit == '亿':
                     matched_val = int(float(raw) * 100000000)
+                elif '.' in raw:
+                    matched_val = float(raw)
                 else:
                     matched_val = int(float(raw))
                 metrics[matched_label] = matched_val
-                line_matched = True
                 logger.info(f'  PARSE: {matched_label}={matched_val}')
 
         if line_matched:
@@ -833,7 +834,7 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
     # 识别在线率百分比（如果有 extra_labels 包含"在线率"）
     extra_labels = matched_type.get('extra_labels', [])
     if '在线率' in extra_labels:
-        rate_match = re.search(r'(\d{1,3}\.\d{1,2})%', all_text)
+        rate_match = re.search(r'(\d{1,3}\.\d{1,2})\s*%', all_text)
         if rate_match:
             online_rate = rate_match.group(0)
 
@@ -1498,6 +1499,18 @@ def index():
                         skip_location = True
                         break
             
+            # 根据当前阈值重新评估最新记录状态（热更新）
+            if latest_record:
+                parsed = _parse_status_to_metrics(latest_record.status_detail or '')
+                if latest_record.metrics:
+                    try:
+                        parsed.update(json.loads(latest_record.metrics))
+                    except:
+                        pass
+                reevaluated = _check_metrics_thresholds(parsed, obj.id, db)
+                if reevaluated and latest_record.result != reevaluated:
+                    latest_record.result = reevaluated
+            
             # 统计状态
             if not latest_record:
                 stats['no_record'] += 1
@@ -1517,8 +1530,10 @@ def index():
                 'skip_location': skip_location,
                 'sort_order': obj.sort_order or 0,
             })
-        # 有最新记录的在前面，同类设备在一起，再按 sort_order 排序
-        object_data.sort(key=lambda x: (0 if x['latest_record'] else 1, x['object'].device_type or '', x['sort_order']))
+        # 按同类设备数量降序排列，再按 sort_order 排序
+        from collections import Counter
+        type_counts = Counter(obj.device_type or '其他' for obj in objects)
+        object_data.sort(key=lambda x: (-type_counts.get(x['object'].device_type or '其他', 0), x['object'].device_type or '', x['sort_order']))
         # 收集所有不重复的 device_type 和 location
         all_types = sorted(set(
             obj.device_type for obj in objects if obj.device_type
@@ -1796,6 +1811,8 @@ def api_records_compute():
     session = SessionLocal()
     try:
         records = session.query(InspectionRecord).all()
+        # 预加载所有对象的 device_type 用于类型匹配
+        obj_types = {o.id: o.device_type for o in session.query(InspectionObject).all()}
         total_updated = 0
         results_summary = []
 
@@ -1810,11 +1827,17 @@ def api_records_compute():
             result_name = cfg.get('result_name', '')
             if not result_name:
                 continue
+            cfg_category = cfg.get('category', '')
 
             updated = 0
             for r in records:
                 if not r.metrics:
                     continue
+                # 跳过类型不匹配的记录
+                if cfg_category:
+                    obj_type = obj_types.get(r.object_id)
+                    if obj_type and obj_type != cfg_category:
+                        continue
                 m = json.loads(r.metrics)
                 result = None
 
@@ -3012,6 +3035,7 @@ def api_dashboard_types_calc_configs():
         cfg = {
             'type_id': t.get('id'),
             'type_name': t.get('name'),
+            'category': t.get('category', ''),
             'calc_type': calc_type,
             'result_name': calc.get('result_name'),
             'show_chart': calc.get('show_chart', False),

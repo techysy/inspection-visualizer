@@ -70,13 +70,16 @@
       "category": "工牌",
       "description": "工牌/账户设备仪表盘",
       "detect_keywords": [
-        "IMEI号",
-        "环卫工牌系统",
         "工牌",
-        "环卫工牌"
+        "环卫工牌",
+        "IMEI号",
+        "账户设备",
+        "环卫工牌系统",
+        "我的关注"
       ],
       "labels": {
         "在线": "在线",
+        "总数": "总数",
         "离线": "离线"
       },
       "extra_labels": [
@@ -95,7 +98,7 @@
           "在线",
           "离线"
         ],
-        "show_chart": true,
+        "show_chart": false,
         "max_value": null
       }
     },
