@@ -83,6 +83,9 @@
 {% set type_groups = {} %}
 {% for item in object_data %}
     {% set dt = item.object.device_type or '其他' %}
+    {% if dt in ['工牌', '车辆'] %}
+        {% set dt = '工牌&车辆' %}
+    {% endif %}
     {% if dt not in type_groups %}
         {% set _ = type_groups.update({dt: []}) %}
     {% endif %}
@@ -95,19 +98,19 @@
 {% endfor %}
 {% set sorted_types = sorted_types|sort(attribute='1', reverse=true) %}
 
-<div class="row" id="object-list">
+<div id="object-list">
     {% for dt, count in sorted_types %}
     <div class="type-group" data-type="{{ dt }}">
         <div class="type-group-header">
             <span class="type-group-title">{{ dt }}</span>
             <span class="type-group-count">{{ count }}</span>
-            {% if count > 3 %}
+            {% if count > 6 %}
             <button class="type-expand-btn" onclick="toggleTypeGroup(this)">展开全部</button>
             {% endif %}
         </div>
         <div class="row type-group-cards">
             {% for item in type_groups[dt] %}
-            <div class="col-lg-4 mb-3 object-item {% if loop.index > 3 %}type-extra{% endif %}"
+            <div class="col-lg-4 mb-3 object-item {% if count > 6 and loop.index > 6 %}type-extra{% endif %}"
                  data-location="{{ item.object.location or '' }}"
                  data-device-type="{{ item.object.device_type or '' }}"
                  data-name="{{ item.object.name or '' }}"

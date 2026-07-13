@@ -135,6 +135,14 @@ def _get_virtual_metric_keys():
             keys.add(cfg['result_name'])
     return keys
 
+def _get_virtual_metric_keys_for_object(obj):
+    """返回指定巡检对象所属类型的虚拟指标 key 集合"""
+    keys = set()
+    for dt in _load_dashboard_types():
+        if dt.get('category') == obj.device_type:
+            keys.update(_get_virtual_metric_keys_for_type(dt))
+    return keys
+
 def _get_virtual_metric_keys_for_type(dtype):
     """返回指定 dashboard type 的 calc_config.result_name（仅该类型的虚拟指标）"""
     cfg = dtype.get('calc_config') or {}
@@ -743,13 +751,15 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
         if not line:
             continue
 
-        # 1) 纯整数行 → 归给第一个等待数字的标签
-        if pending_labels and re.match(r'^\d+$', line):
-            num = int(line)
-            label = pending_labels.pop(0)
-            metrics[label] = num
-            logger.info(f'  PARSE: 纯数字 {num} -> {label}')
-            continue
+        # 1) 纯整数行或括号数字行 → 归给第一个等待数字的标签
+        if pending_labels:
+            num_match = re.match(r'^[\(（]?(\d+)[\)）]?$', line)
+            if num_match:
+                num = int(num_match.group(1))
+                label = pending_labels.pop(0)
+                metrics[label] = num
+                logger.info(f'  PARSE: 数字 {num} -> {label}')
+                continue
 
         # 2) 匹配 "位置名（X/Y）" 或 "X/Y" 格式，自动映射到配置的标签
         m = re.match(r'^(.*?)\s*[（(]?\s*(\d+)\s*/\s*(\d+)\s*[）)]?\s*$', line)
@@ -2221,8 +2231,13 @@ def api_object_metrics_list(object_id):
     """获取巡检对象的指标配置"""
     session = SessionLocal()
     try:
+        obj = session.query(InspectionObject).get(object_id)
         metrics = session.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
-        virtual_keys = _get_virtual_metric_keys()
+        virtual_keys = set()
+        if obj:
+            for dt in _load_dashboard_types():
+                if dt.get('category') == obj.device_type:
+                    virtual_keys.update(_get_virtual_metric_keys_for_type(dt))
         return jsonify([
             {
                 'id': m.id,
@@ -2262,13 +2277,14 @@ def api_object_metrics_add(object_id):
         return jsonify({'error': 'key 和 name 不能为空'}), 400
     session = SessionLocal()
     try:
+        obj = session.query(InspectionObject).get(object_id)
         # 检查 key 是否已存在
         existing = session.query(ObjectMetric).filter_by(object_id=object_id, key=key).first()
         if existing:
             session.close()
             return jsonify({'error': f'key "{key}" 已存在，请使用其他名称'}), 409
         # 不允许手动添加虚拟指标 key
-        virtual_keys = _get_virtual_metric_keys()
+        virtual_keys = _get_virtual_metric_keys_for_object(obj) if obj else set()
         if key in virtual_keys:
             session.close()
             return jsonify({'error': f'key "{key}" 为计算类指标，由仪表盘类型自动管理'}), 400
@@ -2297,7 +2313,8 @@ def api_object_metrics_update(object_id, metric_id):
         if not metric:
             return jsonify({'error': '指标不存在'}), 404
         # 虚拟指标保护（来自 calc_config 的计算结果）
-        virtual_keys = _get_virtual_metric_keys()
+        obj = session.query(InspectionObject).get(object_id)
+        virtual_keys = _get_virtual_metric_keys_for_object(obj) if obj else set()
         is_virtual = metric.key in virtual_keys
         if is_virtual:
             # 只允许编辑阈值和排序，不允许编辑基础配置
@@ -2355,7 +2372,8 @@ def api_object_metrics_delete(object_id, metric_id):
             return jsonify({'error': '指标不存在'}), 404
 
         # 保护虚拟指标（来自 calc_config 的计算结果）
-        virtual_keys = _get_virtual_metric_keys()
+        obj = session.query(InspectionObject).get(object_id)
+        virtual_keys = _get_virtual_metric_keys_for_object(obj) if obj else set()
         if metric.key in virtual_keys:
             return jsonify({'error': '计算类指标不可删除，如需移除请在仪表盘类型管理页面移除计算配置'}), 400
 

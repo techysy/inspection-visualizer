@@ -56,13 +56,25 @@
     {% set _ = grouped[n].append(obj) %}
 {% endfor %}
 
+{% set sorted_groups = [] %}
 {% for name, items in grouped.items() %}
-<div class="object-group" data-group="{{ name }}">
+    {% set _ = sorted_groups.append((items|length, name, items)) %}
+{% endfor %}
+{% set sorted_groups = sorted_groups|sort(reverse=True) %}
+
+{% for count, name, items in sorted_groups %}
+<div class="object-group" data-group="{{ name }}" data-count="{{ items|length }}">
     <div class="object-group-title">
         <span>{{ name }}</span>
         <span class="object-group-count">{{ items|length }}</span>
+        {% if items|length > 9 %}
+        <button class="group-toggle-btn" onclick="toggleGroup(this)" data-expanded="false">
+            <span class="toggle-text">展开</span>
+            <svg class="toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        {% endif %}
     </div>
-    <div class="store-grid">
+    <div class="store-grid{% if items|length > 9 %} store-grid-collapsed{% endif %}">
     {% for obj in items %}
     <div class="store-card" draggable="true" data-id="{{ obj.id }}" data-name="{{ obj.name }}" data-location="{{ obj.location or '' }}" data-device-type="{{ obj.device_type or '' }}" style="cursor:grab;position:relative;">
         <div class="drag-handle" style="position:absolute;top:0;left:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:grab;color:var(--text-muted);font-size:11px;opacity:0.3;transition:opacity 0.15s;" title="拖动排序">⋮⋮</div>
@@ -984,6 +996,44 @@ document.addEventListener('DOMContentLoaded', function() {
     padding: 0.4rem 0.8rem;
     font-style: italic;
 }
+.store-grid-collapsed {
+    max-height: calc(3 * (120px + 0.75rem));
+    overflow: hidden;
+    position: relative;
+}
+.store-grid-collapsed::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: linear-gradient(transparent, var(--bg-page, var(--bg)));
+    pointer-events: none;
+}
+.group-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.72rem;
+    color: var(--accent);
+    background: var(--primary-soft);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-left: auto;
+}
+.group-toggle-btn:hover {
+    border-color: var(--accent);
+}
+.group-toggle-btn .toggle-icon {
+    transition: transform 0.2s;
+}
+.group-toggle-btn[data-expanded="true"] .toggle-icon {
+    transform: rotate(180deg);
+}
 </style>
 <script>
 function confirmDeleteObject(url, name) {
@@ -995,6 +1045,18 @@ function confirmDeleteObject(url, name) {
         document.body.appendChild(form);
         form.submit();
     });
+}
+function toggleGroup(btn) {
+    var group = btn.closest('.object-group');
+    var grid = group.querySelector('.store-grid');
+    var expanded = btn.getAttribute('data-expanded') === 'true';
+    btn.setAttribute('data-expanded', !expanded);
+    btn.querySelector('.toggle-text').textContent = expanded ? '展开' : '收起';
+    if (expanded) {
+        grid.classList.add('store-grid-collapsed');
+    } else {
+        grid.classList.remove('store-grid-collapsed');
+    }
 }
 // 拖动排序（组内）
 document.addEventListener('DOMContentLoaded', function() {
