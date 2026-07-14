@@ -147,6 +147,7 @@ body {
   line-height: 1.5;
   border-left: 3px solid transparent;
   animation: fadeIn 0.2s ease;
+  white-space: pre-line;
 }
 
 .status-info {

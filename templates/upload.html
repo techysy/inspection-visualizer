@@ -441,6 +441,10 @@
             if (data.skipped_duplicate > 0) msg += `，${data.skipped_duplicate} 条重复跳过`;
             var viewLink = data.object_id ? ` <a href="/object/${data.object_id}" class="btn btn-sm btn-outline-primary" style="text-decoration:none;">查看 →</a>` : '';
             saveStatus.innerHTML = `<div class="alert alert-success">${msg}${viewLink}</div>`;
+            if (data.skipped_incomplete > 0) {
+                var reasons = (data.skipped_reasons || []).map(r => `• ${escHtml(r.name)}: ${escHtml(r.reason)}`).join('<br>');
+                saveStatus.innerHTML += `<div class="alert alert-warning" style="margin-top:0.5rem;"><b>${data.skipped_incomplete} 条因指标不完整跳过：</b><br>${reasons}</div>`;
+            }
             btnSave.style.display = 'none';
         } catch(e) {
             saveStatus.innerHTML = `<div class="alert alert-danger">保存失败: ${e.message}</div>`;

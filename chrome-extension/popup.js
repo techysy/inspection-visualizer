@@ -329,7 +329,11 @@ btnSave.addEventListener('click', async () => {
     if (data.created > 0) msg += `，新建 ${data.created} 个位置`;
     if (data.skipped_no_match > 0) msg += `，${data.skipped_no_match} 条未匹配`;
     if (data.skipped_duplicate > 0) msg += `，${data.skipped_duplicate} 条重复`;
-    setStatus(msg, 'success');
+    if (data.skipped_incomplete > 0) {
+      var reasons = (data.skipped_reasons || []).map(r => `${r.name}: ${r.reason}`).join('\n');
+      msg += `\n\n⚠ ${data.skipped_incomplete} 条指标不完整跳过:\n${reasons}`;
+    }
+    setStatus(msg, data.skipped_incomplete > 0 ? 'warning' : 'success');
 
     // 记录保存的 object_id 用于跳转
     if (data.object_id) {

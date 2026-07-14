@@ -3483,6 +3483,8 @@ def api_save():
     skipped = 0
     skipped_duplicate = 0
     skipped_no_match = 0
+    skipped_incomplete = 0
+    skipped_reasons = []
     created = 0
     last_object_id = None
     try:
@@ -3600,6 +3602,24 @@ def api_save():
 
             # 获取仪表盘类型ID，用于构建标签映射
             dashboard_type_id = item.get('dashboard_type', '')
+
+            # 指标完整性校验：仪表盘类型要求的标签必须全部识别到
+            if dashboard_type_id and is_dashboard:
+                dashboard_types_check = _load_dashboard_types()
+                matched_dtype_check = next((dt for dt in dashboard_types_check if dt.get('id') == dashboard_type_id), None)
+                if matched_dtype_check:
+                    required_labels = set(matched_dtype_check.get('labels', {}).values())
+                    calc_result = (matched_dtype_check.get('calc_config') or {}).get('result_name', '')
+                    # 去掉计算类指标（它由公式生成，不需要 OCR 识别）
+                    required_labels.discard(calc_result)
+                    parsed_keys = set(parsed_metrics.keys())
+                    missing = required_labels - parsed_keys
+                    if missing:
+                        logger.info(f'  SAVE: 跳过不完整记录 obj={object_name} 缺少标签 {missing} parsed={list(parsed_metrics.keys())}')
+                        skipped += 1
+                        skipped_incomplete += 1
+                        skipped_reasons.append({'name': object_name, 'reason': f'缺少: {", ".join(missing)}'})
+                        continue
 
             # 构建中文标签 -> 短key 的反向映射（用于匹配已有指标）
             label_to_key = {}
@@ -3738,7 +3758,7 @@ def api_save():
     finally:
         db.close()
 
-    return jsonify({'saved': saved, 'skipped': skipped, 'skipped_duplicate': skipped_duplicate, 'skipped_no_match': skipped_no_match, 'created': created, 'object_id': last_object_id})
+    return jsonify({'saved': saved, 'skipped': skipped, 'skipped_duplicate': skipped_duplicate, 'skipped_no_match': skipped_no_match, 'skipped_incomplete': skipped_incomplete, 'skipped_reasons': skipped_reasons, 'created': created, 'object_id': last_object_id})
 
 
 def _match_object(name, all_objects, expected_type=None):

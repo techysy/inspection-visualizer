@@ -121,10 +121,10 @@
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <h5 class="card-title" style="font-size: 0.95rem; margin:0;">{{ item.object.name }}</h5>
-                                {% if item.latest_record %}
-                                {% if item.latest_record.result == '正常' %}
+                                {% if item.today_record %}
+                                {% if item.today_record.result == '正常' %}
                                 <span class="badge bg-success" style="font-size:0.72rem;">正常</span>
-                                {% elif item.latest_record.result == '异常' %}
+                                {% elif item.today_record.result == '异常' %}
                                 <span class="badge bg-danger" style="font-size:0.72rem;">异常</span>
                                 {% else %}
                                 <span class="badge bg-warning" style="font-size:0.72rem;">需关注</span>
@@ -136,7 +136,7 @@
                             <div class="film-meta">
                                 {% if item.object.location %}<span class="tag-format field-location" style="font-weight:600;">{{ item.object.location }}</span>{% endif %}
                                 {% if item.object.device_type %}<span class="field-device_type">{{ item.object.device_type }}</span>{% endif %}
-                                {% if item.latest_record and item.latest_record.timestamp %}<span class="field-time" data-ts="{{ item.latest_record.timestamp.isoformat() }}">{{ item.latest_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% endif %}
+                                {% if item.today_record and item.today_record.timestamp %}<span class="field-time" data-ts="{{ item.today_record.timestamp.isoformat() }}">{{ item.today_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% elif item.latest_record and item.latest_record.timestamp %}<span class="field-time" data-ts="{{ item.latest_record.timestamp.isoformat() }}">{{ item.latest_record.timestamp.strftime('%Y.%m.%d %H:%M') }}</span>{% endif %}
                             </div>
                             {% if item.latest_metrics %}
                             <div class="metrics-preview field-metrics">
