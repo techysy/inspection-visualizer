@@ -1521,12 +1521,12 @@ def index():
                 if reevaluated and latest_record.result != reevaluated:
                     latest_record.result = reevaluated
             
-            # 统计状态
-            if not latest_record:
+            # 统计状态（按今日记录统计）
+            if not today_record:
                 stats['no_record'] += 1
-            elif latest_record.result == '正常':
+            elif today_record.result == '正常':
                 stats['normal'] += 1
-            elif latest_record.result == '异常':
+            elif today_record.result == '异常':
                 stats['error'] += 1
             else:
                 stats['warning'] += 1
@@ -1577,6 +1577,19 @@ def object_detail(object_id):
         all_inspectors = db.query(Inspector).all()
         default_inspector = all_inspectors[0] if all_inspectors else None
 
+        records_data = [
+            {
+                'id': r.id,
+                'timestamp': r.timestamp.isoformat(),
+                'result': r.result,
+                'status_detail': r.status_detail,
+                'metrics': json.loads(r.metrics) if r.metrics else {},
+                'notes': r.notes,
+                'inspector': r.inspector.name if r.inspector else (default_inspector.name if default_inspector else '未知'),
+            }
+            for r in records
+        ]
+
         # 统计数据
         total_records = len(records)
         normal_count = sum(1 for r in records if r.result == '正常')
@@ -1624,6 +1637,7 @@ def object_detail(object_id):
             'object_detail.html',
             object=obj,
             records=records,
+            records_data=records_data,
             total_records=total_records,
             normal_count=normal_count,
             abnormal_count=abnormal_count,
@@ -3468,6 +3482,33 @@ def api_ocr_test():
     return jsonify({'raw_lines': raw_lines, 'config': config})
 
 
+@main.route('/api/backup-screenshot', methods=['POST'])
+def api_backup_screenshot():
+    """自动备份截图到本地文件夹"""
+    data = request.get_json()
+    if not data or 'image' not in data:
+        return jsonify({'error': '没有图片数据'}), 400
+
+    import base64
+    image_data = data['image']
+    date_folder = data.get('date_folder', datetime.now().strftime('%Y%m%d'))
+    filename = data.get('filename', f'screenshot_{datetime.now().strftime("%H%M%S")}.png')
+
+    # 解析 base64 图片
+    if ',' in image_data:
+        image_data = image_data.split(',', 1)[1]
+    img_bytes = base64.b64decode(image_data)
+
+    # 保存到 backup/日期/ 文件夹
+    backup_dir = Path(__file__).parent / 'backup' / date_folder
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    file_path = backup_dir / filename
+    file_path.write_bytes(img_bytes)
+
+    logger.info(f'  BACKUP: 已保存截图 {file_path}')
+    return jsonify({'ok': True, 'path': str(file_path)})
+
+
 @main.route('/api/save', methods=['POST'])
 def api_save():
     """保存 OCR 识别结果"""
@@ -3476,6 +3517,25 @@ def api_save():
         return jsonify({'error': '没有要保存的数据'}), 400
 
     items = data['items']
+
+    # 保存截图备份
+    screenshot = data.get('screenshot', '')
+    if screenshot:
+        try:
+            import base64 as _b64
+            img_data = screenshot
+            if ',' in img_data:
+                img_data = img_data.split(',', 1)[1]
+            img_bytes = _b64.b64decode(img_data)
+            date_folder = datetime.now().strftime('%Y%m%d')
+            backup_name = f'screenshot_{datetime.now().strftime("%H%M%S")}.png'
+            backup_dir = Path(__file__).parent / 'backup' / date_folder
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            (backup_dir / backup_name).write_bytes(img_bytes)
+            logger.info(f'  BACKUP: 已保存截图 {backup_dir / backup_name}')
+        except Exception as e:
+            logger.warning(f'  BACKUP: 截图备份失败 {e}')
+
     # 用 Flask session 获取当前登录人员（SQLAlchemy session 另用 db 变量避免冲突）
     _login_inspector_id = dict(session).get('inspector_id')
     db = SessionLocal()
@@ -3609,9 +3669,12 @@ def api_save():
                 matched_dtype_check = next((dt for dt in dashboard_types_check if dt.get('id') == dashboard_type_id), None)
                 if matched_dtype_check:
                     required_labels = set(matched_dtype_check.get('labels', {}).values())
-                    calc_result = (matched_dtype_check.get('calc_config') or {}).get('result_name', '')
-                    # 去掉计算类指标（它由公式生成，不需要 OCR 识别）
+                    calc_config = matched_dtype_check.get('calc_config') or {}
+                    calc_result = calc_config.get('result_name', '')
+                    # 去掉计算类指标和 extra_labels（如在线率，OCR 无法直接识别）
                     required_labels.discard(calc_result)
+                    for extra in matched_dtype_check.get('extra_labels', []):
+                        required_labels.discard(extra)
                     parsed_keys = set(parsed_metrics.keys())
                     missing = required_labels - parsed_keys
                     if missing:

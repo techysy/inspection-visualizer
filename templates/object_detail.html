@@ -14,7 +14,7 @@
 
 <h1 class="mt-3 mb-4">{{ object.name }}</h1>
 
-<div class="row mb-4">
+<div class="row mb-4" id="statsRow">
     <div class="col-md-6">
         <div class="card h-100">
             <div class="card-body">
@@ -29,24 +29,27 @@
     </div>
     <div class="col-md-6">
         <div class="card h-100">
-            <div class="card-body">
+            <div class="card-body" style="position:relative;">
+                <label style="position:absolute;top:1rem;right:1rem;display:inline-flex;align-items:center;gap:0.4rem;font-size:0.78rem;color:var(--text-secondary);cursor:pointer;user-select:none;">
+                    <input type="checkbox" id="chartToggle" checked style="cursor:pointer;"> 仅显示最近两周
+                </label>
                 <h5 class="card-title">巡检统计</h5>
                 {% if records %}
                 <div class="d-flex gap-4">
                     <div>
-                        <div class="stat-big stat-accent">{{ total_records }}</div>
+                        <div class="stat-big stat-accent" id="statTotal">{{ total_records }}</div>
                         <div class="stat-desc">巡检次数</div>
                     </div>
                     <div>
-                        <div class="stat-big stat-success">{{ normal_count }}</div>
+                        <div class="stat-big stat-success" id="statNormal">{{ normal_count }}</div>
                         <div class="stat-desc">正常</div>
                     </div>
                     <div>
-                        <div class="stat-big stat-danger">{{ abnormal_count }}</div>
+                        <div class="stat-big stat-danger" id="statAbnormal">{{ abnormal_count }}</div>
                         <div class="stat-desc">异常</div>
                     </div>
                     <div>
-                        <div class="stat-big stat-warn">{{ warn_count }}</div>
+                        <div class="stat-big stat-warn" id="statWarn">{{ warn_count }}</div>
                         <div class="stat-desc">需关注</div>
                     </div>
                 </div>
@@ -89,7 +92,7 @@
 
 <div class="card mb-4">
     <div class="card-body">
-        <h5 class="card-title d-flex justify-content-between align-items-center">
+        <h5 class="card-title d-flex justify-content-between align-items-baseline">
             <span>巡检历史记录</span>
             <span class="badge" style="background:var(--primary-soft);color:var(--accent);font-size:0.75rem;" id="record-count"></span>
         </h5>
@@ -131,6 +134,12 @@
 </style>
 
 <script>
+    var allRecords = [];
+    var resultRawData = [];
+    var resultChart = null;
+    var statusY = { '正常': 1, '异常': 0, '需关注': 0.5 };
+    var resultColors = { '正常': '#22c55e', '异常': '#ef4444', '需关注': '#f59e0b' };
+
     document.addEventListener('DOMContentLoaded', function() {
         fetch('/api/objects/{{ object.id }}/re-evaluate', { method: 'POST' })
             .then(function(r) { return r.json(); })
@@ -139,58 +148,86 @@
         var root = document.documentElement;
         function cv(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
 
-        var ctx = document.getElementById('resultChart').getContext('2d');
-        var colors = {
-            '正常': '#22c55e',
-            '异常': '#ef4444',
-            '需关注': '#f59e0b'
-        };
+        {% for r in records_data %}
+        allRecords.push({{ r|tojson }});
+        {% endfor %}
 
-        var statusY = { '正常': 1, '异常': 0, '需关注': 0.5 };
-        var rawData = [];
         {% for result, data in result_timeline.items() %}
             {% for item in data %}
-                rawData.push({{ item|tojson }});
+                resultRawData.push({{ item|tojson }});
             {% endfor %}
         {% endfor %}
-        rawData.sort(function(a, b) { return a.x - b.x; });
+        resultRawData.sort(function(a, b) { return a.x - b.x; });
 
-        var visibleLabels = rawData.map(function(d) {
-            var dt = new Date(d.x);
-            return dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0');
-        });
-        var visibleValues = rawData.map(function(d) { return statusY[d.result] !== undefined ? statusY[d.result] : 0.5; });
-        var visibleMeta = rawData;
+        function getResultChartData(filtered) {
+            var labels = filtered.map(function(d) {
+                var dt = new Date(d.x);
+                return dt.getFullYear() + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + String(dt.getDate()).padStart(2,'0');
+            });
+            var values = filtered.map(function(d) { return statusY[d.result] !== undefined ? statusY[d.result] : 0.5; });
+            return { labels: labels, values: values, meta: filtered };
+        }
 
-        datasets = [{
-            label: '巡检结果',
-            data: visibleValues,
-            borderColor: '#818cf8',
-            backgroundColor: '#818cf815',
-            borderWidth: 2,
-            tension: 0.4,
-            pointRadius: 5,
-            pointHoverRadius: 7,
-            pointBackgroundColor: function(ctx) {
-                return colors[visibleMeta[ctx.dataIndex].result] || '#818cf8';
-            },
-            pointBorderColor: cv('--bg'),
-            pointBorderWidth: 2,
-            fill: false,
-            segment: {
-                borderColor: function(ctx) {
-                    var p0 = ctx.p0.parsed.y;
-                    var p1 = ctx.p1.parsed.y;
-                    if (p0 === 0 || p1 === 0) return '#ef4444';
-                    if (p0 === 0.5 || p1 === 0.5) return '#f59e0b';
-                    return '#22c55e';
-                }
-            }
-        }];
+        function updateStatsAndResult() {
+            var showAll = !chartToggle.checked;
+            var now = new Date();
+            var weekday = now.getDay() === 0 ? 6 : now.getDay() - 1;
+            var lastMon = new Date(now);
+            lastMon.setDate(now.getDate() - weekday - 7);
+            lastMon.setHours(0, 0, 0, 0);
 
-        var chart = new Chart(ctx, {
+            var filteredRecords = showAll ? allRecords : allRecords.filter(function(r) {
+                if (!r.timestamp) return false;
+                return new Date(r.timestamp) >= lastMon;
+            });
+
+            document.getElementById('statTotal').textContent = filteredRecords.length;
+            document.getElementById('statNormal').textContent = filteredRecords.filter(function(r) { return r.result === '正常'; }).length;
+            document.getElementById('statAbnormal').textContent = filteredRecords.filter(function(r) { return r.result === '异常'; }).length;
+            document.getElementById('statWarn').textContent = filteredRecords.filter(function(r) { return r.result === '需关注'; }).length;
+
+            var filteredResult = showAll ? resultRawData : resultRawData.filter(function(d) {
+                return new Date(d.x) >= lastMon;
+            });
+            var chartData = getResultChartData(filteredResult);
+            resultChart.data.labels = chartData.labels;
+            resultChart.data.datasets[0].data = chartData.values;
+            window._resultMeta = chartData.meta;
+            resultChart.update();
+        }
+
+        window._updateStatsAndResult = updateStatsAndResult;
+
+        var ctx = document.getElementById('resultChart').getContext('2d');
+        var firstData = getResultChartData(resultRawData);
+        window._resultMeta = firstData.meta;
+        resultChart = new Chart(ctx, {
             type: 'line',
-            data: { labels: visibleLabels, datasets: datasets },
+            data: { labels: firstData.labels, datasets: [{
+                label: '巡检结果',
+                data: firstData.values,
+                borderColor: '#818cf8',
+                backgroundColor: '#818cf815',
+                borderWidth: 2,
+                tension: 0.4,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointBackgroundColor: function(ctx) {
+                    return resultColors[window._resultMeta[ctx.dataIndex].result] || '#818cf8';
+                },
+                pointBorderColor: cv('--bg'),
+                pointBorderWidth: 2,
+                fill: false,
+                segment: {
+                    borderColor: function(ctx) {
+                        var p0 = ctx.p0.parsed.y;
+                        var p1 = ctx.p1.parsed.y;
+                        if (p0 === 0 || p1 === 0) return '#ef4444';
+                        if (p0 === 0.5 || p1 === 0.5) return '#f59e0b';
+                        return '#22c55e';
+                    }
+                }
+            }] },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -236,7 +273,7 @@
                                 return '';
                             },
                             label: function(c) {
-                                var d = visibleMeta[c.dataIndex];
+                                var d = window._resultMeta[c.dataIndex];
                                 return d.result + ' (巡检人: ' + d.inspector + ')';
                             }
                         }
@@ -262,21 +299,23 @@
             }
         });
 
+        updateStatsAndResult();
+
         function updateChart() {
-            chart.options.scales.x.grid.color = cv('--grid-line');
-            chart.options.scales.x.ticks.color = cv('--text-dim');
-            chart.options.scales.x.title.color = cv('--text-dim');
-            chart.options.scales.x.title.color = cv('--text-dim');
-            chart.options.scales.y.grid.color = cv('--grid-line');
-            chart.options.scales.y.ticks.color = cv('--text-dim');
-            chart.options.scales.y.title.color = cv('--text-dim');
-            chart.options.plugins.tooltip.backgroundColor = cv('--chart-tooltip-bg');
-            chart.options.plugins.tooltip.borderColor = cv('--chart-tooltip-border');
-            chart.options.plugins.tooltip.titleColor = cv('--text-heading');
-            chart.options.plugins.tooltip.bodyColor = cv('--chart-tooltip-text');
-            chart.options.plugins.legend.labels.color = cv('--text-secondary');
-            chart.data.datasets.forEach(function(ds) { ds.pointBorderColor = cv('--bg'); });
-            chart.update('none');
+            resultChart.options.scales.x.grid.color = cv('--grid-line');
+            resultChart.options.scales.x.ticks.color = cv('--text-dim');
+            resultChart.options.scales.x.title.color = cv('--text-dim');
+            resultChart.options.scales.x.title.color = cv('--text-dim');
+            resultChart.options.scales.y.grid.color = cv('--grid-line');
+            resultChart.options.scales.y.ticks.color = cv('--text-dim');
+            resultChart.options.scales.y.title.color = cv('--text-dim');
+            resultChart.options.plugins.tooltip.backgroundColor = cv('--chart-tooltip-bg');
+            resultChart.options.plugins.tooltip.borderColor = cv('--chart-tooltip-border');
+            resultChart.options.plugins.tooltip.titleColor = cv('--text-heading');
+            resultChart.options.plugins.tooltip.bodyColor = cv('--chart-tooltip-text');
+            resultChart.options.plugins.legend.labels.color = cv('--text-secondary');
+            resultChart.data.datasets.forEach(function(ds) { ds.pointBorderColor = cv('--bg'); });
+            resultChart.update('none');
         }
 
         new MutationObserver(updateChart).observe(root, { attributes: true, attributeFilter: ['data-resolved'] });
@@ -285,6 +324,19 @@
     });
 
     var metricsConfig = {{ metrics_config|tojson }};
+    var chartToggle = document.getElementById('chartToggle');
+    var loadDays = 14;
+    var chartInstances = {};
+
+    var saved = localStorage.getItem('objectDetail_showAll');
+    if (saved !== null) chartToggle.checked = saved !== 'false';
+    else chartToggle.checked = true;
+
+    chartToggle.addEventListener('change', function() {
+        localStorage.setItem('objectDetail_showAll', chartToggle.checked);
+        if (window._updateStatsAndResult) window._updateStatsAndResult();
+        loadInspectionHistory();
+    });
 
     function fmtVal(mc, raw) {
         var n = parseFloat(raw);
@@ -296,6 +348,7 @@
 
     function loadInspectionHistory() {
         var objectId = {{ object.id }};
+        var showAll = !chartToggle.checked;
         fetch('/api/inspection_history/' + objectId)
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -306,6 +359,16 @@
                     el.innerHTML = '<p class="text-muted" style="font-size:0.85rem;">暂无记录</p>';
                     return;
                 }
+                var chartData = showAll ? data : data.filter(function(item) {
+                    if (!item.timestamp) return false;
+                    var d = new Date(item.timestamp);
+                    var now = new Date();
+                    var weekday = now.getDay() === 0 ? 6 : now.getDay() - 1;
+                    var lastMon = new Date(now);
+                    lastMon.setDate(now.getDate() - weekday - 7);
+                    lastMon.setHours(0, 0, 0, 0);
+                    return d >= lastMon;
+                });
                 // 按周分组，本周展开，上周及更早自动收起
                 var now = new Date();
                 var dow = now.getDay();
@@ -373,7 +436,7 @@
                 html += '</div>';
                 el.innerHTML = html;
 
-                renderMetricsCharts(data);
+                renderMetricsCharts(chartData);
             });
     }
 
@@ -385,6 +448,11 @@
             if (!mc.show_in_chart) return;
             var canvas = document.getElementById('metricChart' + mc.id);
             if (!canvas) return;
+
+            if (chartInstances[mc.id]) {
+                chartInstances[mc.id].destroy();
+                chartInstances[mc.id] = null;
+            }
 
             var dataRev = historyData.slice().reverse().filter(function(item) {
                 if (!item.timestamp) return true;
@@ -416,7 +484,7 @@
             var palette = ['#6366f1','#22c55e','#ef4444','#f59e0b','#06b6d4','#ec4899'];
             var color = palette[metricsConfig.indexOf(mc) % palette.length];
 
-            new Chart(canvas.getContext('2d'), {
+            chartInstances[mc.id] = new Chart(canvas.getContext('2d'), {
                 type: 'line',
                 data: {
                     labels: labels,

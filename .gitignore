@@ -26,3 +26,4 @@ Thumbs.db
 # Runtime
 server.pid
 log/
+backup/

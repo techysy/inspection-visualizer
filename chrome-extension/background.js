@@ -57,7 +57,7 @@ async function processRegion(rect) {
     chrome.action.setBadgeText({ text: '...', tabId: tab.id });
     chrome.action.setBadgeBackgroundColor({ color: '#6366f1', tabId: tab.id });
 
-    // 读取登录信息（跨域 API 需要）
+    // 读取登录信息
     const { __authUsername, __authPassword } = await chrome.storage.local.get(['__authUsername', '__authPassword']);
 
     // 调用 OCR API
