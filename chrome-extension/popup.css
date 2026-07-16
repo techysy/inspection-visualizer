@@ -361,13 +361,13 @@ body {
 /* Action buttons */
 .action-buttons {
   display: flex;
-  flex-direction: column;
   gap: 8px;
 }
 
 .save-row {
   display: flex;
   gap: 8px;
+  width: 100%;
 }
 
 .save-row .btn {
