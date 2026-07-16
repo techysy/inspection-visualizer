@@ -130,9 +130,13 @@ def _get_virtual_metric_keys():
     """返回所有 dashboard type calc_config 中定义的 result_name 集合（虚拟指标不可删除）"""
     keys = set()
     for t in _load_dashboard_types():
-        cfg = t.get('calc_config') or {}
-        if cfg.get('result_name'):
-            keys.add(cfg['result_name'])
+        calc_configs = t.get('calc_configs') or []
+        single_config = t.get('calc_config')
+        if single_config:
+            calc_configs = [single_config]
+        for cfg in calc_configs:
+            if cfg.get('result_name'):
+                keys.add(cfg['result_name'])
     return keys
 
 def _get_virtual_metric_keys_for_object(obj):
@@ -145,17 +149,26 @@ def _get_virtual_metric_keys_for_object(obj):
 
 def _get_virtual_metric_keys_for_type(dtype):
     """返回指定 dashboard type 的 calc_config.result_name（仅该类型的虚拟指标）"""
-    cfg = dtype.get('calc_config') or {}
-    if cfg.get('result_name'):
-        return [cfg['result_name']]
-    return []
+    keys = []
+    # 支持单个 calc_config 或数组 calc_configs
+    calc_configs = dtype.get('calc_configs') or []
+    single_config = dtype.get('calc_config')
+    if single_config:
+        calc_configs = [single_config]
+    for cfg in calc_configs:
+        if cfg.get('result_name'):
+            keys.append(cfg['result_name'])
+    return keys
 
 
 def _sync_virtual_metrics_for_dtype(dtype, session):
-    calc = dtype.get('calc_config')
-    if not calc or not calc.get('result_name'):
+    """同步仪表盘类型的虚拟指标到巡检对象"""
+    calc_configs = dtype.get('calc_configs') or []
+    single_config = dtype.get('calc_config')
+    if single_config:
+        calc_configs = [single_config]
+    if not calc_configs:
         return
-    result_name = calc.get('result_name')
     category = dtype.get('category', '')
     if not category:
         return
@@ -164,17 +177,24 @@ def _sync_virtual_metrics_for_dtype(dtype, session):
         InspectionObject.status == 'active',
         ((InspectionObject.device_type == category) | InspectionObject.device_type.is_(None))
     ).all()
-    for obj in objects:
-        existing = session.query(ObjectMetric).filter_by(object_id=obj.id, key=result_name).first()
-        if existing:
-            existing.show_in_chart = calc.get('show_chart', False)
-            existing.max_value = calc.get('max_value')
-        else:
-            session.add(ObjectMetric(
-                object_id=obj.id, key=result_name, name=result_name, unit='',
-                max_value=calc.get('max_value') or 100,
-                show_in_chart=calc.get('show_chart', False)
-            ))
+    for calc in calc_configs:
+        if not calc or not calc.get('result_name'):
+            continue
+        result_name = calc.get('result_name')
+        unit = calc.get('unit', '')
+        for obj in objects:
+            existing = session.query(ObjectMetric).filter_by(object_id=obj.id, key=result_name).first()
+            if existing:
+                existing.show_in_chart = calc.get('show_chart', False)
+                existing.max_value = calc.get('max_value')
+                if unit:
+                    existing.unit = unit
+            else:
+                session.add(ObjectMetric(
+                    object_id=obj.id, key=result_name, name=result_name, unit=unit,
+                    max_value=calc.get('max_value') or 100,
+                    show_in_chart=calc.get('show_chart', False)
+                ))
 
 
 def _sync_dashboard_type_from_object(obj, metrics):
@@ -3791,6 +3811,50 @@ def api_save():
                 timestamp=timestamp
             )
             db.add(record)
+
+            # 增量计算（与上一条记录对比）
+            if matched_dtype:
+                calc_config = matched_dtype.get('calc_config') or {}
+                if calc_config.get('type') == 'increment':
+                    source_field = calc_config.get('source_field', '')
+                    result_name = calc_config.get('result_name', '')
+                    unit = calc_config.get('unit', '')
+                    if source_field and result_name:
+                        # 查找上一条记录
+                        prev_record = db.query(InspectionRecord).filter(
+                            InspectionRecord.object_id == obj.id,
+                            InspectionRecord.id != record.id
+                        ).order_by(InspectionRecord.timestamp.desc()).first()
+                        if prev_record and prev_record.metrics:
+                            prev_metrics = json.loads(prev_record.metrics) if isinstance(prev_record.metrics, str) else prev_record.metrics
+                            curr_val = parsed_metrics.get(source_field)
+                            prev_val = prev_metrics.get(source_field)
+                            if curr_val is not None and prev_val is not None:
+                                try:
+                                    curr_num = float(str(curr_val).rstrip('%'))
+                                    prev_num = float(str(prev_val).rstrip('%'))
+                                    increment = curr_num - prev_num
+                                    if increment == int(increment):
+                                        increment = int(increment)
+                                    else:
+                                        increment = round(increment, 4)
+                                    parsed_metrics[result_name] = increment
+                                    record.metrics = json.dumps(parsed_metrics, ensure_ascii=False)
+                                    logger.info(f'  SAVE: 增量计算 {result_name} = {curr_val} - {prev_val} = {increment}')
+                                    # 自动创建增量指标配置
+                                    existing_metrics = {m.key: m for m in db.query(ObjectMetric).filter_by(object_id=obj.id).all()}
+                                    if result_name not in existing_metrics:
+                                        db.add(ObjectMetric(
+                                            object_id=obj.id, key=result_name, name=result_name, unit=unit,
+                                            max_value=calc_config.get('max_value'), show_in_chart=calc_config.get('show_chart', True)
+                                        ))
+                                    else:
+                                        m = existing_metrics[result_name]
+                                        if calc_config.get('max_value') is not None:
+                                            m.max_value = calc_config['max_value']
+                                        m.show_in_chart = calc_config.get('show_chart', True)
+                                except (ValueError, TypeError) as e:
+                                    logger.info(f'  SAVE: 增量计算失败 {e}')
 
             # 计数模式：保存日列表记录
             list_items = item.get('_list_items', [])

@@ -205,6 +205,7 @@
                     <option value="percentage">计算百分比</option>
                     <option value="sum">求和</option>
                     <option value="difference">差值</option>
+                    <option value="increment">增量（与上次对比）</option>
                 </select>
             </div>
             
@@ -364,6 +365,35 @@
                     <input class="form-check-input" type="checkbox" id="calc-diff-show-chart" checked>
                     <label class="form-check-label" for="calc-diff-show-chart" style="font-size:0.85rem">计算结果在图表中显示</label>
                 </div>
+            </div>
+            <div id="calc-increment" class="calc-section" style="display:none">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">增量指标名称</label>
+                        <input type="text" class="form-control form-control-sm" id="calc-inc-name" placeholder="如: 硬盘单日增量">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">单位 <small class="text-muted">（可选）</small></label>
+                        <input type="text" class="form-control form-control-sm" id="calc-inc-unit" placeholder="如: GB">
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">对比源字段</label>
+                        <select class="form-control form-control-sm" id="calc-inc-source">
+                            <option value="">选择字段</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">图表最大值 <small class="text-muted">（Y轴上限）</small></label>
+                        <input type="number" class="form-control form-control-sm" id="calc-inc-max" placeholder="如: 100">
+                    </div>
+                </div>
+                <div class="form-check mt-2 mb-3">
+                    <input class="form-check-input" type="checkbox" id="calc-inc-show-chart" checked>
+                    <label class="form-check-label" for="calc-inc-show-chart" style="font-size:0.85rem">计算结果在图表中显示</label>
+                </div>
+                <div class="text-muted" style="font-size:0.8rem">保存记录时自动计算与上一条记录的差值</div>
             </div>
             <hr class="my-3">
             <div class="mb-3">
@@ -660,6 +690,12 @@
                     diffFixedGroup.style.display = 'none';
                     diffMinuendSelect.value = calcConfig.minuend || '';
                 }
+            } else if (calcConfig.type === 'increment') {
+                document.getElementById('calc-inc-name').value = calcConfig.result_name || '';
+                document.getElementById('calc-inc-source').value = calcConfig.source_field || '';
+                document.getElementById('calc-inc-unit').value = calcConfig.unit || '';
+                document.getElementById('calc-inc-show-chart').checked = calcConfig.show_chart !== false;
+                document.getElementById('calc-inc-max').value = calcConfig.max_value || '';
             } else if (calcConfig.type === 'custom') {
                 document.getElementById('calc-custom-name').value = calcConfig.result_name || '';
                 document.getElementById('calc-custom-formula').value = calcConfig.formula || '';
@@ -775,6 +811,12 @@
         diffMinuendSelect.style.display = '';
         diffFixedGroup.style.display = 'none';
         
+        document.getElementById('calc-inc-name').value = '';
+        document.getElementById('calc-inc-source').value = '';
+        document.getElementById('calc-inc-unit').value = '';
+        document.getElementById('calc-inc-show-chart').checked = true;
+        document.getElementById('calc-inc-max').value = '';
+        
         document.getElementById('calc-custom-name').value = '';
         document.getElementById('calc-custom-formula').value = '';
         document.getElementById('calc-custom-show-chart').checked = true;
@@ -878,6 +920,9 @@
             case 'difference':
                 targetSection = document.getElementById('calc-difference');
                 break;
+            case 'increment':
+                targetSection = document.getElementById('calc-increment');
+                break;
             default:
                 targetSection = document.getElementById('calc-custom');
         }
@@ -942,6 +987,16 @@
             subtrahendSelect.innerHTML = defaultOption + options;
             if ([...subtrahendSelect.options].some(o => o.value === currentVal)) {
                 subtrahendSelect.value = currentVal;
+            }
+        }
+        
+        // 更新增量字段
+        const incSourceSelect = document.getElementById('calc-inc-source');
+        if (incSourceSelect) {
+            const currentVal = incSourceSelect.value;
+            incSourceSelect.innerHTML = defaultOption + options;
+            if ([...incSourceSelect.options].some(o => o.value === currentVal)) {
+                incSourceSelect.value = currentVal;
             }
         }
         
@@ -1116,6 +1171,21 @@
                 subtrahend: subtrahend,
                 show_chart: document.getElementById('calc-diff-show-chart').checked,
                 max_value: parseFloat(document.getElementById('calc-diff-max').value) || null
+            };
+        }
+        
+        if (type === 'increment') {
+            const resultName = document.getElementById('calc-inc-name').value;
+            const source = document.getElementById('calc-inc-source').value;
+            const unit = document.getElementById('calc-inc-unit').value;
+            if (!resultName || !source) return null;
+            return {
+                type: 'increment',
+                result_name: resultName,
+                source_field: source,
+                unit: unit,
+                show_chart: document.getElementById('calc-inc-show-chart').checked,
+                max_value: parseFloat(document.getElementById('calc-inc-max').value) || null
             };
         }
         
