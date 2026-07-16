@@ -361,11 +361,33 @@ body {
 /* Action buttons */
 .action-buttons {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.action-buttons .btn {
+.save-row {
+  display: flex;
+  gap: 8px;
+}
+
+.save-row .btn {
   flex: 1;
+}
+
+.backup-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+}
+
+.backup-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }
 
 .btn-view {
@@ -520,4 +542,5 @@ body {
   .toggle-slider { background: #4d4d60; }
   .toggle-text { color: #e2e8f0; }
   .toggle-hint { color: #64748b; }
+  .backup-toggle { color: #94a3b8; }
 }

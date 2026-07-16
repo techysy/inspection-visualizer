@@ -11,7 +11,7 @@
       <span class="title">巡检截图识别</span>
     </div>
     <div class="header-right">
-      <span class="version">v1.4</span>
+      <span class="version">v2.0</span>
     </div>
   </div>
 
@@ -45,18 +45,24 @@
     <div id="rawText" class="raw-text hidden"></div>
 
     <div id="actionButtons" class="action-buttons hidden">
-      <button id="btnSave" class="btn btn-success">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
-        </svg>
-        <span>保存到系统</span>
-      </button>
-      <button id="btnView" class="btn btn-view hidden">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-        </svg>
-        <span>查看</span>
-      </button>
+      <div class="save-row">
+        <button id="btnSave" class="btn btn-success">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+          </svg>
+          <span>保存到系统</span>
+        </button>
+        <button id="btnView" class="btn btn-view hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          <span>查看</span>
+        </button>
+      </div>
+      <label class="backup-toggle">
+        <input type="checkbox" id="backupToggle" checked>
+        <span>保存时备份截图</span>
+      </label>
     </div>
 
   </div>

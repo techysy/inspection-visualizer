@@ -19,6 +19,14 @@ let currentItems = [];
 let currentFlatItems = [];
 let lastSavedObjectId = null;
 
+const backupToggle = document.getElementById('backupToggle');
+chrome.storage.local.get('__backupScreenshot', (data) => {
+  backupToggle.checked = data.__backupScreenshot !== false;
+});
+backupToggle.addEventListener('change', () => {
+  chrome.storage.local.set({ __backupScreenshot: backupToggle.checked });
+});
+
 function isLoggedIn() { return !!window.__authToken; }
 
 function setStatus(msg, type) {
@@ -314,10 +322,11 @@ btnSave.addEventListener('click', async () => {
   btnSave.disabled = true;
 
   try {
-    const storage = await chrome.storage.local.get('__ocrPreview');
+    const doBackup = backupToggle.checked;
+    const screenshot = doBackup ? (await chrome.storage.local.get('__ocrPreview')).__ocrPreview || '' : '';
     const resp = await apiFetch(API_BASE + '/api/save', {
       method: 'POST',
-      body: JSON.stringify({ items: currentItems, screenshot: storage.__ocrPreview || '' })
+      body: JSON.stringify({ items: currentItems, screenshot })
     });
     const data = await resp.json();
 
