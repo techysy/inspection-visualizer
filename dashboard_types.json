@@ -108,14 +108,15 @@
       "category": "服务器",
       "description": "录像机仪表盘",
       "detect_keywords": [
+        "存储池",
         "录像服务器",
-        "录像池",
-        "存储池"
+        "录像池"
       ],
       "labels": {
         "已用容量": "已用容量",
         "总容量": "总容量",
-        "已使用": "已使用"
+        "已使用": "已使用",
+        "单日新增": "单日新增"
       },
       "formulas": {
         "已使用": "已用容量/总容量"
@@ -131,6 +132,16 @@
         "show_chart": true,
         "max_value": 100
       },
+      "calc_configs": [
+        {
+          "type": "increment",
+          "result_name": "单日新增",
+          "source_field": "已用容量",
+          "unit": "TB",
+          "show_chart": true,
+          "max_value": 10
+        }
+      ],
       "extra_labels": [
         "_pct_config"
       ],

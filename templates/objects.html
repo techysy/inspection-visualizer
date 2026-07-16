@@ -220,6 +220,9 @@
                         <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;">
                             <input type="checkbox" class="dataOpsCb" value="backfill_offline" checked style="cursor:pointer;"> 补全缺失的「离线」（总数 - 在线）
                         </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;">
+                            <input type="checkbox" class="dataOpsCb" value="backfill_increment" style="cursor:pointer;"> 补全增量指标（逐条与上一条对比）
+                        </label>
                     </div>
                 </div>
                 <div style="border-top:1px solid var(--border);padding-top:1rem;margin-top:0.5rem;">
@@ -296,6 +299,14 @@ function execDataOps() {
             return fetch('/api/records/backfill', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.ok) return '回填完成，更新 ' + d.updated + ' 条';
                 throw new Error(d.error || '回填失败');
+            });
+        });
+    }
+    if (selected.indexOf('backfill_increment') !== -1) {
+        steps.push(function() {
+            return fetch('/api/records/backfill-increment', {method: 'POST'}).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) return '增量回填完成，更新 ' + d.updated + ' 条';
+                throw new Error(d.error || '增量回填失败');
             });
         });
     }

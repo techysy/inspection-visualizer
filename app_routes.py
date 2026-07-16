@@ -133,7 +133,7 @@ def _get_virtual_metric_keys():
         calc_configs = t.get('calc_configs') or []
         single_config = t.get('calc_config')
         if single_config:
-            calc_configs = [single_config]
+            calc_configs = [single_config] + calc_configs
         for cfg in calc_configs:
             if cfg.get('result_name'):
                 keys.add(cfg['result_name'])
@@ -154,7 +154,7 @@ def _get_virtual_metric_keys_for_type(dtype):
     calc_configs = dtype.get('calc_configs') or []
     single_config = dtype.get('calc_config')
     if single_config:
-        calc_configs = [single_config]
+        calc_configs = [single_config] + calc_configs
     for cfg in calc_configs:
         if cfg.get('result_name'):
             keys.append(cfg['result_name'])
@@ -166,7 +166,7 @@ def _sync_virtual_metrics_for_dtype(dtype, session):
     calc_configs = dtype.get('calc_configs') or []
     single_config = dtype.get('calc_config')
     if single_config:
-        calc_configs = [single_config]
+        calc_configs = [single_config] + calc_configs
     if not calc_configs:
         return
     category = dtype.get('category', '')
@@ -1643,6 +1643,13 @@ def object_detail(object_id):
 
         # 获取指标配置
         object_metrics = db.query(ObjectMetric).filter_by(object_id=object_id).order_by(ObjectMetric.sort_order).all()
+        # 收集增量指标的 result_name
+        increment_keys = set()
+        for dt in _load_dashboard_types():
+            if dt.get('category') == obj.device_type:
+                for c in (dt.get('calc_configs') or []):
+                    if c.get('type') == 'increment' and c.get('result_name'):
+                        increment_keys.add(c['result_name'])
         metrics_config = [
             {
                 'id': m.id, 'key': m.key, 'name': m.name, 'unit': m.unit,
@@ -1798,6 +1805,78 @@ def api_records_backfill():
                     r.metrics = json.dumps(m, ensure_ascii=False)
                     updated += 1
 
+        session.commit()
+        return jsonify({'ok': True, 'updated': updated})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@main.route('/api/records/backfill-increment', methods=['POST'])
+def api_records_backfill_increment():
+    """回填增量指标：按时间顺序遍历记录，逐条计算与上一条的差值"""
+    session = SessionLocal()
+    try:
+        types_list = _load_dashboard_types()
+        # 收集所有 increment 配置: { source_field, result_name }
+        increment_configs = []
+        for t in types_list:
+            calc_configs = t.get('calc_configs') or []
+            single = t.get('calc_config')
+            if single and single.get('type') == 'increment':
+                calc_configs = [single] + calc_configs
+            for c in calc_configs:
+                if c.get('type') == 'increment' and c.get('source_field') and c.get('result_name'):
+                    increment_configs.append(c)
+        if not increment_configs:
+            return jsonify({'ok': True, 'updated': 0, 'message': '无增量配置'})
+
+        objects = session.query(InspectionObject).filter_by(status='active').all()
+        updated = 0
+        for obj in objects:
+            records = (
+                session.query(InspectionRecord)
+                .filter_by(object_id=obj.id)
+                .order_by(InspectionRecord.timestamp.asc())
+                .all()
+            )
+            if not records:
+                continue
+            for i in range(len(records)):
+                curr_r = records[i]
+                curr_m = json.loads(curr_r.metrics) if curr_r.metrics else {}
+                changed = False
+                for cfg in increment_configs:
+                    src = cfg['source_field']
+                    rname = cfg['result_name']
+                    curr_val = curr_m.get(src)
+                    if curr_val is None:
+                        continue
+                    if i == 0:
+                        # 首条记录，无对比基准，增量为0
+                        increment = 0
+                    else:
+                        prev_r = records[i - 1]
+                        prev_m = json.loads(prev_r.metrics) if prev_r.metrics else {}
+                        pv = prev_m.get(src)
+                        try:
+                            curr_num = float(str(curr_val).rstrip('%'))
+                            prev_num = float(str(pv).rstrip('%')) if pv is not None else 0
+                            increment = curr_num - prev_num
+                            # 按天数平滑：间隔>1天时除以天数
+                            gap_days = (curr_r.timestamp - prev_r.timestamp).total_seconds() / 86400
+                            if gap_days > 1:
+                                increment = increment / gap_days
+                        except (ValueError, TypeError):
+                            continue
+                    increment = round(increment, 1)
+                    curr_m[rname] = increment
+                    changed = True
+                if changed:
+                    curr_r.metrics = json.dumps(curr_m, ensure_ascii=False)
+                    updated += 1
         session.commit()
         return jsonify({'ok': True, 'updated': updated})
     except Exception as e:
@@ -3110,6 +3189,18 @@ def api_dashboard_types_calc_configs():
             cfg['fields'] = calc.get('fields', [])
             cfg['formula'] = calc.get('formula', '')
         configs.append(cfg)
+        # 同时收集 calc_configs 中的非 increment 配置（increment 由独立回填处理）
+        for extra in (t.get('calc_configs') or []):
+            if extra.get('type') != 'increment' and extra.get('result_name'):
+                configs.append({
+                    'type_id': t.get('id'),
+                    'type_name': t.get('name'),
+                    'category': t.get('category', ''),
+                    'calc_type': extra.get('type'),
+                    'result_name': extra.get('result_name'),
+                    'show_chart': extra.get('show_chart', False),
+                    'max_value': extra.get('max_value')
+                })
     return jsonify(configs)
 
 
@@ -3148,15 +3239,28 @@ def api_dashboard_types_add():
     if any(t['id'] == new_id for t in types_list):
         return jsonify({'error': f'ID "{new_id}" 已存在'}), 409
 
+    new_labels = data.get('labels', {})
+    # 清理 labels 中的计算类指标
+    calc_result_names = set()
+    new_calc = data.get('calc_config')
+    if new_calc and new_calc.get('result_name'):
+        calc_result_names.add(new_calc['result_name'])
+    for c in (data.get('calc_configs') or []):
+        if c.get('result_name'):
+            calc_result_names.add(c['result_name'])
+    if calc_result_names and isinstance(new_labels, dict):
+        new_labels = {k: v for k, v in new_labels.items() if v not in calc_result_names}
+
     new_type = {
         'id': new_id,
         'name': data['name'].strip(),
         'category': data.get('category', '').strip(),
         'description': data.get('description', '').strip(),
         'detect_keywords': data.get('detect_keywords', []),
-        'labels': data.get('labels', {}),
+        'labels': new_labels,
         'formulas': data.get('formulas', {}),
         'calc_config': data.get('calc_config', None),
+        'calc_configs': data.get('calc_configs', []),
         'extra_labels': data.get('extra_labels', []),
         'result_rules': data.get('result_rules', {}),
         'number_before_label': data.get('number_before_label', False),
@@ -3193,14 +3297,26 @@ def api_dashboard_types_update(type_id):
     types_list = _load_dashboard_types()
     for i, t in enumerate(types_list):
         if t['id'] == type_id:
+            new_labels = data.get('labels', t['labels'])
+            # 清理 labels 中的计算类指标（result_name 不应出现在标签映射中）
+            calc_result_names = set()
+            new_calc = data.get('calc_config', t.get('calc_config'))
+            if new_calc and new_calc.get('result_name'):
+                calc_result_names.add(new_calc['result_name'])
+            for c in (data.get('calc_configs', t.get('calc_configs', [])) or []):
+                if c.get('result_name'):
+                    calc_result_names.add(c['result_name'])
+            if calc_result_names and isinstance(new_labels, dict):
+                new_labels = {k: v for k, v in new_labels.items() if v not in calc_result_names}
             types_list[i].update({
                 'name': data.get('name', t['name']),
                 'category': data.get('category', t.get('category', '')),
                 'description': data.get('description', t['description']),
                 'detect_keywords': data.get('detect_keywords', t['detect_keywords']),
-                'labels': data.get('labels', t['labels']),
+                'labels': new_labels,
                 'formulas': data.get('formulas', t.get('formulas', {})),
                 'calc_config': data.get('calc_config', t.get('calc_config', None)),
+                'calc_configs': data.get('calc_configs', t.get('calc_configs', [])),
                 'extra_labels': data.get('extra_labels', t.get('extra_labels', [])),
                 'result_rules': data.get('result_rules', t.get('result_rules', {})),
                 'number_before_label': data.get('number_before_label', t.get('number_before_label', False)),
@@ -3210,6 +3326,47 @@ def api_dashboard_types_update(type_id):
             # 双向同步 + 虚拟指标同步
             try:
                 session = SessionLocal()
+                # 检查 calc_config / calc_configs 中 result_name 是否改名，同步更新历史记录
+                old_calc = t.get('calc_config')
+                new_calc = types_list[i].get('calc_config')
+                old_configs = t.get('calc_configs') or []
+                new_configs = types_list[i].get('calc_configs') or []
+                rename_pairs = []
+                if old_calc and new_calc and old_calc.get('result_name') and new_calc.get('result_name'):
+                    if old_calc['result_name'] != new_calc['result_name']:
+                        rename_pairs.append((old_calc['result_name'], new_calc['result_name']))
+                for old_c, new_c in zip(old_configs, new_configs):
+                    if old_c.get('type') == 'increment' and new_c.get('type') == 'increment':
+                        if old_c.get('result_name') and new_c.get('result_name') and old_c['result_name'] != new_c['result_name']:
+                            rename_pairs.append((old_c['result_name'], new_c['result_name']))
+                if rename_pairs:
+                    obj = session.query(InspectionObject).filter_by(name=types_list[i]['name'], status='active').first()
+                    if not obj and type_id.startswith('obj_'):
+                        try:
+                            obj = session.query(InspectionObject).get(int(type_id[4:]))
+                        except (ValueError, IndexError):
+                            pass
+                    if obj:
+                        records = session.query(InspectionRecord).filter_by(object_id=obj.id).all()
+                        for r in records:
+                            m = json.loads(r.metrics) if r.metrics else {}
+                            changed = False
+                            for old_key, new_key in rename_pairs:
+                                if old_key in m:
+                                    m[new_key] = m.pop(old_key)
+                                    changed = True
+                            if changed:
+                                r.metrics = json.dumps(m, ensure_ascii=False)
+                        # 重命名 ObjectMetric（先删旧再建新，避免重复）
+                        for old_key, new_key in rename_pairs:
+                            old_metric = session.query(ObjectMetric).filter_by(object_id=obj.id, key=old_key).first()
+                            if old_metric:
+                                # 检查 new_key 是否已存在，存在则先删旧的
+                                existing_new = session.query(ObjectMetric).filter_by(object_id=obj.id, key=new_key).first()
+                                if existing_new and existing_new.id != old_metric.id:
+                                    session.delete(existing_new)
+                                old_metric.key = new_key
+                                old_metric.name = new_key
                 _sync_virtual_metrics_for_dtype(types_list[i], session)
                 obj = session.query(InspectionObject).filter_by(name=types_list[i]['name'], status='active').first()
                 if not obj and type_id.startswith('obj_'):
@@ -3218,6 +3375,11 @@ def api_dashboard_types_update(type_id):
                     except (ValueError, IndexError):
                         pass
                 if obj:
+                    # 清理改名后残留的旧指标
+                    for old_key, new_key in rename_pairs:
+                        stale = session.query(ObjectMetric).filter_by(object_id=obj.id, key=old_key).first()
+                        if stale:
+                            session.delete(stale)
                     _sync_bidirectional(obj.id, type_id, session)
                 session.commit()
                 session.close()
@@ -3756,19 +3918,11 @@ def api_save():
                         # 如果是计算字段且配置了 max_value，使用配置值
                         if is_calc_field and calc_max_value is not None:
                             m.max_value = calc_max_value
-                        else:
-                            new_max = max(fv * 1.5, 100)
-                            if m.unit == 'w':
-                                new_max = max(fv * 1.5, 10000)
-                            if new_max > (m.max_value or 100):
-                                m.max_value = new_max
                         # 更新 show_in_chart
                         if is_calc_field:
                             m.show_in_chart = calc_show_chart
                         if fv >= 10000 and not m.unit:
                             m.unit = 'w'
-                            if not is_calc_field or calc_max_value is None:
-                                m.max_value = max(fv * 1.5, 10000)
                     elif cn_name and cn_name in existing_names:
                         pass  # 已有同名指标，跳过
                     else:
@@ -3776,10 +3930,9 @@ def api_save():
                         if is_calc_field and calc_max_value is not None:
                             max_val = calc_max_value
                         else:
-                            max_val = max(fv * 1.5, 100)
+                            max_val = 100
                             if fv >= 10000:
                                 unit = 'w'
-                                max_val = max(fv * 1.5, 10000)
                         db.add(ObjectMetric(
                             object_id=obj.id, key=mapped_key, name=cn_name or mapped_key, unit=unit,
                             max_value=max_val, show_in_chart=calc_show_chart
@@ -3814,47 +3967,60 @@ def api_save():
 
             # 增量计算（与上一条记录对比）
             if matched_dtype:
-                calc_config = matched_dtype.get('calc_config') or {}
-                if calc_config.get('type') == 'increment':
+                # 检查 calc_config 或 calc_configs 中的 increment 配置
+                calc_configs_list = matched_dtype.get('calc_configs') or []
+                single_config = matched_dtype.get('calc_config')
+                if single_config and single_config.get('type') == 'increment':
+                    calc_configs_list = [single_config] + calc_configs_list
+                for calc_config in calc_configs_list:
+                    if calc_config.get('type') != 'increment':
+                        continue
                     source_field = calc_config.get('source_field', '')
                     result_name = calc_config.get('result_name', '')
                     unit = calc_config.get('unit', '')
                     if source_field and result_name:
-                        # 查找上一条记录
-                        prev_record = db.query(InspectionRecord).filter(
-                            InspectionRecord.object_id == obj.id,
-                            InspectionRecord.id != record.id
-                        ).order_by(InspectionRecord.timestamp.desc()).first()
-                        if prev_record and prev_record.metrics:
-                            prev_metrics = json.loads(prev_record.metrics) if isinstance(prev_record.metrics, str) else prev_record.metrics
-                            curr_val = parsed_metrics.get(source_field)
-                            prev_val = prev_metrics.get(source_field)
-                            if curr_val is not None and prev_val is not None:
-                                try:
-                                    curr_num = float(str(curr_val).rstrip('%'))
-                                    prev_num = float(str(prev_val).rstrip('%'))
-                                    increment = curr_num - prev_num
-                                    if increment == int(increment):
-                                        increment = int(increment)
+                        curr_val = parsed_metrics.get(source_field)
+                        if curr_val is not None:
+                            try:
+                                curr_num = float(str(curr_val).rstrip('%'))
+                                # 查找上一条记录
+                                prev_record = db.query(InspectionRecord).filter(
+                                    InspectionRecord.object_id == obj.id,
+                                    InspectionRecord.id != record.id
+                                ).order_by(InspectionRecord.timestamp.desc()).first()
+                                if prev_record and prev_record.metrics:
+                                    prev_metrics = json.loads(prev_record.metrics) if isinstance(prev_record.metrics, str) else prev_record.metrics
+                                    pv = prev_metrics.get(source_field)
+                                    if pv is not None:
+                                        prev_num = float(str(pv).rstrip('%'))
+                                        increment = curr_num - prev_num
+                                        # 按天数平滑：间隔>1天时除以天数
+                                        gap_days = (record.timestamp - prev_record.timestamp).total_seconds() / 86400
+                                        if gap_days > 1:
+                                            increment = increment / gap_days
                                     else:
-                                        increment = round(increment, 4)
-                                    parsed_metrics[result_name] = increment
-                                    record.metrics = json.dumps(parsed_metrics, ensure_ascii=False)
-                                    logger.info(f'  SAVE: 增量计算 {result_name} = {curr_val} - {prev_val} = {increment}')
-                                    # 自动创建增量指标配置
-                                    existing_metrics = {m.key: m for m in db.query(ObjectMetric).filter_by(object_id=obj.id).all()}
-                                    if result_name not in existing_metrics:
-                                        db.add(ObjectMetric(
-                                            object_id=obj.id, key=result_name, name=result_name, unit=unit,
-                                            max_value=calc_config.get('max_value'), show_in_chart=calc_config.get('show_chart', True)
-                                        ))
-                                    else:
-                                        m = existing_metrics[result_name]
-                                        if calc_config.get('max_value') is not None:
-                                            m.max_value = calc_config['max_value']
-                                        m.show_in_chart = calc_config.get('show_chart', True)
-                                except (ValueError, TypeError) as e:
-                                    logger.info(f'  SAVE: 增量计算失败 {e}')
+                                        increment = 0
+                                else:
+                                    # 首条记录，无对比基准，增量为0
+                                    increment = 0
+                                increment = round(increment, 1)
+                                parsed_metrics[result_name] = increment
+                                record.metrics = json.dumps(parsed_metrics, ensure_ascii=False)
+                                logger.info(f'  SAVE: 增量计算 {result_name} = {curr_val} - {prev_val} = {increment}')
+                                # 自动创建增量指标配置
+                                existing_metrics = {m.key: m for m in db.query(ObjectMetric).filter_by(object_id=obj.id).all()}
+                                if result_name not in existing_metrics:
+                                    db.add(ObjectMetric(
+                                        object_id=obj.id, key=result_name, name=result_name, unit=unit,
+                                        max_value=calc_config.get('max_value'), show_in_chart=calc_config.get('show_chart', True)
+                                    ))
+                                else:
+                                    m = existing_metrics[result_name]
+                                    if calc_config.get('max_value') is not None:
+                                        m.max_value = calc_config['max_value']
+                                    m.show_in_chart = calc_config.get('show_chart', True)
+                            except (ValueError, TypeError) as e:
+                                logger.info(f'  SAVE: 增量计算失败 {e}')
 
             # 计数模式：保存日列表记录
             list_items = item.get('_list_items', [])

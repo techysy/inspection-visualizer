@@ -34,7 +34,7 @@
   position: fixed;
   display: none;
   border: 2px solid #6366f1;
-  background: rgba(99, 102, 241, 0.08);
+  background: transparent;
   pointer-events: none;
   z-index: 2147483647;
   border-radius: 4px;

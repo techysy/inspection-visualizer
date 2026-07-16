@@ -18,6 +18,7 @@
 - 🔎 **双维度筛选**：按位置 + 分类组合筛选巡检对象
 - 📤 **数据导出**：下拉菜单导出为 JSON / 自包含 HTML 文件 / Excel 巡检报告（含在线率、离线自动计算）
 - 🧮 **计算类别补全**：数据维护支持百分比、差值、求和、自定义公式计算新指标
+- 📈 **增量计算**：独立开关，自动与上一条记录对比，按天数平滑（周末÷3），首条为0，支持历史回填
 - 🧬 **虚拟指标**：仪表盘类型 `calc_config` 自动管理虚拟指标，不可删除仅可编辑阈值
 - 🔍 **对象列表筛选**：对象管理页面输入名称/位置/分类实时筛选匹配的巡检对象
 - 🗂️ **历史记录按周折叠**：详情页历史记录按本周/上周/更早分组，上周及更早自动收起
@@ -307,6 +308,7 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/inspection_history/<id>` | GET | 📜 巡检历史 JSON API |
 | `/api/inspection_history/delete/<id>` | POST | 🗑️ 删除巡检记录 |
 | `/api/records/backfill` | POST | 🔄 回填历史记录（补全缺失的总数/离线） |
+| `/api/records/backfill-increment` | POST | 📈 回填增量指标（按天数平滑，首条为0） |
 | `/api/records/cleanup` | POST | 🧹 清理错误的总数/离线字段 |
 | `/api/records/compute` | POST | 🧮 计算补全指标（求和/百分比/差值/自定义公式） |
 | `/api/export/excel` | GET/POST | 📤 导出巡检报告 Excel（含在线率、离线计算） |

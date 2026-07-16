@@ -469,7 +469,8 @@
                 var m = item.metrics || {};
                 var val = m[mc.name] || m[mc.key];
                 if (val === undefined || val === null || val === '') return null;
-                var num = parseFloat(String(val).replace(/[^0-9.\-]/g, '')) || null;
+                var num = parseFloat(String(val).replace(/[^0-9.\-]/g, ''));
+                if (isNaN(num)) num = null;
                 if (num !== null && mc.unit === 'w') num = num / 10000;
                 var mv = mc.max_value ? parseFloat(mc.max_value) : null;
                 if (num !== null && mv !== null && num > mv) return null;
@@ -533,7 +534,7 @@
                             cornerRadius: 8,
                             callbacks: {
                                 title: function(items) { return items.length ? items[0].label : ''; },
-                                label: function(c) { var suf = hasPercent ? '%' : (mc.unit === 'w' ? 'w' : ''); return mc.name + ': ' + c.parsed.y + suf; }
+                                label: function(c) { var suf = hasPercent ? '%' : (mc.unit ? mc.unit : ''); return mc.name + ': ' + c.parsed.y + suf; }
                             }
                         }
                     }

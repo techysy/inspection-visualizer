@@ -205,7 +205,6 @@
                     <option value="percentage">计算百分比</option>
                     <option value="sum">求和</option>
                     <option value="difference">差值</option>
-                    <option value="increment">增量（与上次对比）</option>
                 </select>
             </div>
             
@@ -366,7 +365,16 @@
                     <label class="form-check-label" for="calc-diff-show-chart" style="font-size:0.85rem">计算结果在图表中显示</label>
                 </div>
             </div>
-            <div id="calc-increment" class="calc-section" style="display:none">
+            <hr class="my-3">
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="modal-type-inc-toggle">
+                    <label class="form-check-label" for="modal-type-inc-toggle">
+                        启用增量计算 <small class="text-muted">（保存时自动与上一条记录对比，首条按0计算）</small>
+                    </label>
+                </div>
+            </div>
+            <div id="calc-increment" style="display:none">
                 <div class="row mb-3">
                     <div class="col-md-6">
                         <label class="form-label">增量指标名称</label>
@@ -690,12 +698,6 @@
                     diffFixedGroup.style.display = 'none';
                     diffMinuendSelect.value = calcConfig.minuend || '';
                 }
-            } else if (calcConfig.type === 'increment') {
-                document.getElementById('calc-inc-name').value = calcConfig.result_name || '';
-                document.getElementById('calc-inc-source').value = calcConfig.source_field || '';
-                document.getElementById('calc-inc-unit').value = calcConfig.unit || '';
-                document.getElementById('calc-inc-show-chart').checked = calcConfig.show_chart !== false;
-                document.getElementById('calc-inc-max').value = calcConfig.max_value || '';
             } else if (calcConfig.type === 'custom') {
                 document.getElementById('calc-custom-name').value = calcConfig.result_name || '';
                 document.getElementById('calc-custom-formula').value = calcConfig.formula || '';
@@ -712,6 +714,28 @@
         } else {
             calcTypeSelect.value = 'custom';
             updateCalcTypeFields();
+        }
+        
+        // 恢复增量配置
+        const calcConfigs = t.calc_configs || [];
+        const incConfig = calcConfigs.find(c => c.type === 'increment');
+        if (incConfig) {
+            incToggle.checked = true;
+            incSection.style.display = '';
+            document.getElementById('calc-inc-name').value = incConfig.result_name || '';
+            document.getElementById('calc-inc-source').value = incConfig.source_field || '';
+            document.getElementById('calc-inc-unit').value = incConfig.unit || '';
+            document.getElementById('calc-inc-show-chart').checked = incConfig.show_chart !== false;
+            document.getElementById('calc-inc-max').value = incConfig.max_value || '';
+            setTimeout(() => updateCalcFieldOptions(), 100);
+        } else {
+            incToggle.checked = false;
+            incSection.style.display = 'none';
+            document.getElementById('calc-inc-name').value = '';
+            document.getElementById('calc-inc-source').value = '';
+            document.getElementById('calc-inc-unit').value = '';
+            document.getElementById('calc-inc-show-chart').checked = true;
+            document.getElementById('calc-inc-max').value = '';
         }
         
         document.getElementById('modal-advanced-fields').style.display = '';
@@ -816,6 +840,8 @@
         document.getElementById('calc-inc-unit').value = '';
         document.getElementById('calc-inc-show-chart').checked = true;
         document.getElementById('calc-inc-max').value = '';
+        incToggle.checked = false;
+        incSection.style.display = 'none';
         
         document.getElementById('calc-custom-name').value = '';
         document.getElementById('calc-custom-formula').value = '';
@@ -852,6 +878,9 @@
             rules: document.getElementById('modal-type-rules').value.trim(),
             numBefore: document.getElementById('modal-type-num-before').checked,
             skipLocation: document.getElementById('modal-type-skip-location').checked,
+            incrementToggle: document.getElementById('modal-type-inc-toggle').checked,
+            incrementName: document.getElementById('calc-inc-name').value,
+            incrementSource: document.getElementById('calc-inc-source').value,
         };
     }
 
@@ -894,7 +923,8 @@
 
     ['modal-type-id-input','modal-type-name','modal-type-desc','modal-type-keywords',
      'modal-type-labels','modal-type-extra-rate','modal-type-rules','modal-type-num-before',
-     'modal-type-skip-location','modal-type-category'
+     'modal-type-skip-location','modal-type-category','modal-type-inc-toggle',
+     'calc-inc-name','calc-inc-source'
     ].forEach(id => {
         const el = document.getElementById(id);
         el.addEventListener('input', checkModalDirty);
@@ -919,9 +949,6 @@
                 break;
             case 'difference':
                 targetSection = document.getElementById('calc-difference');
-                break;
-            case 'increment':
-                targetSection = document.getElementById('calc-increment');
                 break;
             default:
                 targetSection = document.getElementById('calc-custom');
@@ -990,11 +1017,34 @@
             }
         }
         
-        // 更新增量字段
+        // 更新增量字段（排除计算类指标）
         const incSourceSelect = document.getElementById('calc-inc-source');
         if (incSourceSelect) {
             const currentVal = incSourceSelect.value;
-            incSourceSelect.innerHTML = defaultOption + options;
+            // 收集所有 calc_config 的 result_name
+            const calcResultNames = [];
+            const calcType = calcTypeSelect.value;
+            if (calcType === 'custom') {
+                const n = document.getElementById('calc-custom-name').value;
+                if (n) calcResultNames.push(n);
+            } else if (calcType === 'percentage') {
+                const n = document.getElementById('calc-pct-name').value;
+                if (n) calcResultNames.push(n);
+            } else if (calcType === 'sum') {
+                const n = document.getElementById('calc-sum-name').value;
+                if (n) calcResultNames.push(n);
+            } else if (calcType === 'difference') {
+                const n = document.getElementById('calc-diff-name').value;
+                if (n) calcResultNames.push(n);
+            }
+            // 排除增量自身的 result_name
+            const incName = document.getElementById('calc-inc-name').value;
+            if (incName) calcResultNames.push(incName);
+            // 过滤掉计算类指标
+            const filteredOptions = Object.entries(labels).filter(([k, v]) => !calcResultNames.includes(v)).map(([k, v]) =>
+                `<option value="${escAttr(v)}">${escHtml(k)}</option>`
+            ).join('');
+            incSourceSelect.innerHTML = defaultOption + filteredOptions;
             if ([...incSourceSelect.options].some(o => o.value === currentVal)) {
                 incSourceSelect.value = currentVal;
             }
@@ -1032,6 +1082,14 @@
         if (calcTypeSelect.value !== 'custom') {
             updateCalcFieldOptions();
         }
+    });
+    
+    // 增量计算开关
+    const incToggle = document.getElementById('modal-type-inc-toggle');
+    const incSection = document.getElementById('calc-increment');
+    incToggle.addEventListener('change', () => {
+        incSection.style.display = incToggle.checked ? '' : 'none';
+        if (incToggle.checked) updateCalcFieldOptions();
     });
     
     // 自定义公式 - 更新变量列表
@@ -1103,22 +1161,23 @@
     
     function getCalcConfig() {
         const type = calcTypeSelect.value;
+        let calcConfig = null;
+        
         if (type === 'custom') {
             const resultName = document.getElementById('calc-custom-name').value;
             const formula = document.getElementById('calc-custom-formula').value;
             const fields = [...document.querySelectorAll('#calc-custom-fields input:checked')].map(i => i.value);
-            if (!resultName || !formula || fields.length === 0) return null;
-            return {
-                type: 'custom',
-                result_name: resultName,
-                fields: fields,
-                formula: formula,
-                show_chart: document.getElementById('calc-custom-show-chart').checked,
-                max_value: parseFloat(document.getElementById('calc-custom-max').value) || null
-            };
-        }
-        
-        if (type === 'percentage') {
+            if (resultName && formula && fields.length > 0) {
+                calcConfig = {
+                    type: 'custom',
+                    result_name: resultName,
+                    fields: fields,
+                    formula: formula,
+                    show_chart: document.getElementById('calc-custom-show-chart').checked,
+                    max_value: parseFloat(document.getElementById('calc-custom-max').value) || null
+                };
+            }
+        } else if (type === 'percentage') {
             const numerator = document.getElementById('calc-pct-numerator').value;
             const useFixedDenom = denomToggle.textContent === '字段';
             const denominator = useFixedDenom ? '' : denomSelect.value;
@@ -1126,70 +1185,69 @@
             const resultName = document.getElementById('calc-pct-name').value;
             const decimal = document.getElementById('calc-pct-decimal').value;
             const format = document.getElementById('calc-pct-format').value;
-            
-            if (!resultName || !numerator || (!denominator && !fixedValue)) return null;
-            
-            return {
-                type: 'percentage',
-                result_name: resultName,
-                numerator: numerator,
-                denominator_type: useFixedDenom ? 'fixed' : 'field',
-                denominator: useFixedDenom ? fixedValue : denominator,
-                decimal_places: parseInt(decimal),
-                format: format,
-                show_chart: document.getElementById('calc-pct-show-chart').checked,
-                max_value: parseFloat(document.getElementById('calc-pct-max').value) || null
-            };
-        }
-        
-        if (type === 'sum') {
+            if (resultName && numerator && (denominator || fixedValue)) {
+                calcConfig = {
+                    type: 'percentage',
+                    result_name: resultName,
+                    numerator: numerator,
+                    denominator_type: useFixedDenom ? 'fixed' : 'field',
+                    denominator: useFixedDenom ? fixedValue : denominator,
+                    decimal_places: parseInt(decimal),
+                    format: format,
+                    show_chart: document.getElementById('calc-pct-show-chart').checked,
+                    max_value: parseFloat(document.getElementById('calc-pct-max').value) || null
+                };
+            }
+        } else if (type === 'sum') {
             const resultName = document.getElementById('calc-sum-name').value;
             const fields = [...document.querySelectorAll('#calc-sum-fields input:checked')].map(i => i.value);
-            if (!resultName || fields.length < 2) return null;
-            return { 
-                type: 'sum', 
-                result_name: resultName, 
-                fields: fields,
-                show_chart: document.getElementById('calc-sum-show-chart').checked,
-                max_value: parseFloat(document.getElementById('calc-sum-max').value) || null
-            };
-        }
-        
-        if (type === 'difference') {
+            if (resultName && fields.length >= 2) {
+                calcConfig = { 
+                    type: 'sum', 
+                    result_name: resultName, 
+                    fields: fields,
+                    show_chart: document.getElementById('calc-sum-show-chart').checked,
+                    max_value: parseFloat(document.getElementById('calc-sum-max').value) || null
+                };
+            }
+        } else if (type === 'difference') {
             const resultName = document.getElementById('calc-diff-name').value;
             const useFixedMinuend = diffMinuendToggle.textContent === '字段';
             const minuend = useFixedMinuend ? '' : diffMinuendSelect.value;
             const fixedMinuendValue = useFixedMinuend ? document.getElementById('calc-diff-fixed-value').value : '';
             const subtrahend = document.getElementById('calc-diff-subtrahend').value;
-            if (!resultName || (!minuend && !fixedMinuendValue) || !subtrahend) return null;
-            return { 
-                type: 'difference', 
-                result_name: resultName, 
-                minuend: useFixedMinuend ? fixedMinuendValue : minuend, 
-                minuend_type: useFixedMinuend ? 'fixed' : 'field',
-                minuend_fixed: fixedMinuendValue,
-                subtrahend: subtrahend,
-                show_chart: document.getElementById('calc-diff-show-chart').checked,
-                max_value: parseFloat(document.getElementById('calc-diff-max').value) || null
-            };
+            if (resultName && (minuend || fixedMinuendValue) && subtrahend) {
+                calcConfig = { 
+                    type: 'difference', 
+                    result_name: resultName, 
+                    minuend: useFixedMinuend ? fixedMinuendValue : minuend, 
+                    minuend_type: useFixedMinuend ? 'fixed' : 'field',
+                    minuend_fixed: fixedMinuendValue,
+                    subtrahend: subtrahend,
+                    show_chart: document.getElementById('calc-diff-show-chart').checked,
+                    max_value: parseFloat(document.getElementById('calc-diff-max').value) || null
+                };
+            }
         }
         
-        if (type === 'increment') {
-            const resultName = document.getElementById('calc-inc-name').value;
-            const source = document.getElementById('calc-inc-source').value;
-            const unit = document.getElementById('calc-inc-unit').value;
-            if (!resultName || !source) return null;
-            return {
-                type: 'increment',
-                result_name: resultName,
-                source_field: source,
-                unit: unit,
-                show_chart: document.getElementById('calc-inc-show-chart').checked,
-                max_value: parseFloat(document.getElementById('calc-inc-max').value) || null
-            };
+        // 增量配置（独立开关）
+        let incrementConfig = null;
+        if (incToggle.checked) {
+            const incName = document.getElementById('calc-inc-name').value;
+            const incSource = document.getElementById('calc-inc-source').value;
+            if (incName && incSource) {
+                incrementConfig = {
+                    type: 'increment',
+                    result_name: incName,
+                    source_field: incSource,
+                    unit: document.getElementById('calc-inc-unit').value,
+                    show_chart: document.getElementById('calc-inc-show-chart').checked,
+                    max_value: parseFloat(document.getElementById('calc-inc-max').value) || null
+                };
+            }
         }
         
-        return null;
+        return { calc_config: calcConfig, increment_config: incrementConfig };
     }
 
     document.getElementById('modal-confirm').addEventListener('click', async () => {
@@ -1226,7 +1284,7 @@
             const generatedId = typeId || name.toLowerCase().replace(/[^a-z0-9]/g, '') || ('type_' + Date.now());
             
             // 获取计算配置
-            const calcConfig = getCalcConfig();
+            const { calc_config: calcConfig, increment_config: incrementConfig } = getCalcConfig();
             const calcType = calcTypeSelect.value;
             
             // 如果是结构化计算类型，生成对应的 formulas
@@ -1252,15 +1310,30 @@
                 };
             }
             
+            // 清理 labels 中的计算类指标（result_name 不应出现在标签映射中）
+            const calcResultNames = [];
+            if (calcConfig && calcConfig.result_name) calcResultNames.push(calcConfig.result_name);
+            if (incrementConfig && incrementConfig.result_name) calcResultNames.push(incrementConfig.result_name);
+            const cleanedLabels = {};
+            for (const [k, v] of Object.entries(labels)) {
+                if (!calcResultNames.includes(v)) {
+                    cleanedLabels[k] = v;
+                }
+            }
+            // 回写清理后的标签到 textarea
+            const cleanedText = Object.entries(cleanedLabels).map(([k, v]) => `${k}=${v}`).join('\n');
+            document.getElementById('modal-type-labels').value = cleanedText;
+            
             const payload = {
                 id: generatedId,
                 name: name,
                 category: document.getElementById('modal-type-category').value === '__new__' ? '' : document.getElementById('modal-type-category').value.trim(),
                 description: document.getElementById('modal-type-desc').value.trim(),
                 detect_keywords: document.getElementById('modal-type-keywords').value.split('\n').map(s => s.trim()).filter(Boolean),
-                labels: labels,
+                labels: cleanedLabels,
                 formulas: finalFormulas,
                 calc_config: calcConfig,
+                calc_configs: incrementConfig ? [incrementConfig] : [],
                 extra_labels: extraLabels,
                 result_rules: rules,
                 number_before_label: document.getElementById('modal-type-num-before').checked,
