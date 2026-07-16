@@ -53,12 +53,35 @@ async function processRegion(rect) {
     // 存储截图预览
     chrome.storage.local.set({ __ocrPreview: cropped });
 
+    // 读取登录信息
+    const { __authUsername, __authPassword } = await chrome.storage.local.get(['__authUsername', '__authPassword']);
+
+    // 截图后立即备份（开关控制）
+    const { __backupScreenshot } = await chrome.storage.local.get('__backupScreenshot');
+    if (__backupScreenshot !== false) {
+      const now = new Date();
+      const dateStr = now.getFullYear().toString() +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0');
+      const timeStr = String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0') +
+        String(now.getSeconds()).padStart(2, '0');
+      fetch(API_BASE + '/api/backup-screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: cropped,
+          filename: `screenshot_${timeStr}.png`,
+          date_folder: dateStr,
+          username: __authUsername || '',
+          password: __authPassword || ''
+        })
+      }).catch(() => {});
+    }
+
     // badge 显示"识别中"
     chrome.action.setBadgeText({ text: '...', tabId: tab.id });
     chrome.action.setBadgeBackgroundColor({ color: '#6366f1', tabId: tab.id });
-
-    // 读取登录信息
-    const { __authUsername, __authPassword } = await chrome.storage.local.get(['__authUsername', '__authPassword']);
 
     // 调用 OCR API
     const resp = await fetch(API_BASE + '/api/ocr', {
