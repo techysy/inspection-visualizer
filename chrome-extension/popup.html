@@ -61,12 +61,17 @@
       </div>
     </div>
 
-    <div class="settings-row" style="border-top:1px solid #e2e8f0;margin-top:12px;padding-top:10px;display:flex;align-items:center;">
-      <label class="backup-toggle">
-        <input type="checkbox" id="backupToggle" checked>
-        <span>截图后自动备份</span>
-      </label>
-      <a id="btnOpenBackup" class="backup-link" title="复制今日备份路径">📁</a>
+    <div id="settingsArea" class="settings-row" style="border-top:1px solid #e2e8f0;margin-top:12px;padding-top:10px;">
+      <div class="backup-row">
+        <label class="backup-toggle">
+          <input type="checkbox" id="backupToggle" checked>
+          <span>自动备份</span>
+        </label>
+        <a id="btnOpenBackup" class="backup-link" title="复制备份路径">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span id="backupPath"></span>
+        </a>
+      </div>
     </div>
 
   </div>

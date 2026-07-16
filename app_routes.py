@@ -3482,6 +3482,15 @@ def api_ocr_test():
     return jsonify({'raw_lines': raw_lines, 'config': config})
 
 
+@main.route('/api/backup-today-path')
+def api_backup_today_path():
+    """获取今日备份文件夹绝对路径"""
+    date_folder = datetime.now().strftime('%Y%m%d')
+    backup_dir = Path(__file__).parent / 'backup' / date_folder
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    return jsonify({'path': str(backup_dir.resolve())})
+
+
 @main.route('/api/backup-screenshot', methods=['POST'])
 def api_backup_screenshot():
     """自动备份截图到本地文件夹"""

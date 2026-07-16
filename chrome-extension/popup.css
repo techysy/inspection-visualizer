@@ -375,32 +375,52 @@ body {
 }
 
 .backup-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   color: #64748b;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
 
 .backup-toggle input[type="checkbox"] {
   width: 14px;
   height: 14px;
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+.backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 
 .backup-link {
-  margin-left: auto;
-  font-size: 14px;
+  font-size: 12px;
   text-decoration: none;
   cursor: pointer;
-  opacity: 0.6;
+  opacity: 0.7;
   transition: opacity 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #94a3b8;
+  min-width: 0;
 }
 
 .backup-link:hover {
   opacity: 1;
+}
+
+#backupPath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
 }
 
 .btn-view {

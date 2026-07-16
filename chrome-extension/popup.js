@@ -21,22 +21,31 @@ let lastSavedObjectId = null;
 
 const backupToggle = document.getElementById('backupToggle');
 const btnOpenBackup = document.getElementById('btnOpenBackup');
+const backupPath = document.getElementById('backupPath');
+const settingsArea = document.getElementById('settingsArea');
+
 chrome.storage.local.get('__backupScreenshot', (data) => {
   backupToggle.checked = data.__backupScreenshot !== false;
 });
 backupToggle.addEventListener('change', () => {
   chrome.storage.local.set({ __backupScreenshot: backupToggle.checked });
 });
+
+fetch(API_BASE + '/api/backup-today-path').then(r => r.json()).then(d => {
+  if (d.path) {
+    backupPath.textContent = d.path.split(/[/\\]/).pop();
+    btnOpenBackup.dataset.fullPath = d.path;
+  }
+}).catch(() => {});
+
 btnOpenBackup.addEventListener('click', () => {
-  const now = new Date();
-  const dateStr = now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, '0') +
-    String(now.getDate()).padStart(2, '0');
-  const path = `backup/${dateStr}`;
-  navigator.clipboard.writeText(path).then(() => {
-    btnOpenBackup.textContent = '✓';
-    setTimeout(() => { btnOpenBackup.textContent = '📁'; }, 1500);
-  });
+  const text = btnOpenBackup.dataset.fullPath;
+  if (text) {
+    navigator.clipboard.writeText(text).then(() => {
+      btnOpenBackup.style.opacity = '1';
+      setTimeout(() => { btnOpenBackup.style.opacity = ''; }, 1200);
+    });
+  }
 });
 
 function isLoggedIn() { return !!window.__authToken; }
@@ -148,6 +157,7 @@ btnLogin.addEventListener('click', doLogin);
 chrome.storage.local.get(['__ocrResults', '__ocrError', '__ocrRawLines', '__ocrPreview'], (data) => {
   if (data.__ocrError) {
     setStatus(data.__ocrError, 'error');
+    show(settingsArea);
     clearOcrStorage();
     return;
   }
@@ -159,11 +169,13 @@ chrome.storage.local.get(['__ocrResults', '__ocrError', '__ocrRawLines', '__ocrP
     currentItems = data.__ocrResults;
     showResultItems(currentItems);
     show(btnSave);
+    hide(settingsArea);
     clearOcrStorage();
   } else if (data.__ocrRawLines && data.__ocrRawLines.length > 0) {
     setStatus('未识别到巡检记录', 'warning');
     rawTextEl.textContent = data.__ocrRawLines.join('\n');
     show(rawTextEl);
+    show(settingsArea);
     clearOcrStorage();
   }
 });
@@ -216,6 +228,7 @@ btnCapture.addEventListener('click', async () => {
   hide(rawTextEl);
   hide(btnSave);
   hide(previewArea);
+  hide(settingsArea);
   currentItems = [];
   currentFlatItems = [];
   clearOcrStorage();
@@ -363,6 +376,7 @@ btnSave.addEventListener('click', async () => {
 
     hide(btnSave);
     show(btnView);
+    show(settingsArea);
     currentFlatItems = [];
   } catch (e) {
     setStatus('保存失败: ' + e.message, 'error');
