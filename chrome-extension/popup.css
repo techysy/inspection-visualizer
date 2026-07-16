@@ -390,6 +390,19 @@ body {
   cursor: pointer;
 }
 
+.backup-link {
+  margin-left: auto;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.backup-link:hover {
+  opacity: 1;
+}
+
 .btn-view {
   background: #6366f1;
   color: #ffffff;
@@ -543,4 +556,5 @@ body {
   .toggle-text { color: #e2e8f0; }
   .toggle-hint { color: #64748b; }
   .backup-toggle { color: #94a3b8; }
+  .backup-link { color: #94a3b8; }
 }

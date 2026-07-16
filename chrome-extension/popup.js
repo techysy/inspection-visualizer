@@ -20,11 +20,23 @@ let currentFlatItems = [];
 let lastSavedObjectId = null;
 
 const backupToggle = document.getElementById('backupToggle');
+const btnOpenBackup = document.getElementById('btnOpenBackup');
 chrome.storage.local.get('__backupScreenshot', (data) => {
   backupToggle.checked = data.__backupScreenshot !== false;
 });
 backupToggle.addEventListener('change', () => {
   chrome.storage.local.set({ __backupScreenshot: backupToggle.checked });
+});
+btnOpenBackup.addEventListener('click', () => {
+  const now = new Date();
+  const dateStr = now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    String(now.getDate()).padStart(2, '0');
+  const path = `backup/${dateStr}`;
+  navigator.clipboard.writeText(path).then(() => {
+    btnOpenBackup.textContent = '✓';
+    setTimeout(() => { btnOpenBackup.textContent = '📁'; }, 1500);
+  });
 });
 
 function isLoggedIn() { return !!window.__authToken; }
