@@ -322,9 +322,10 @@ btnSave.addEventListener('click', async () => {
   btnSave.disabled = true;
 
   try {
+    const screenshot = (await chrome.storage.local.get('__ocrPreview')).__ocrPreview || '';
     const resp = await apiFetch(API_BASE + '/api/save', {
       method: 'POST',
-      body: JSON.stringify({ items: currentItems })
+      body: JSON.stringify({ items: currentItems, screenshot })
     });
     const data = await resp.json();
 
