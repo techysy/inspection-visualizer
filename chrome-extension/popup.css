@@ -374,55 +374,6 @@ body {
   flex: 1;
 }
 
-.backup-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #64748b;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.backup-toggle input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.backup-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.backup-link {
-  font-size: 12px;
-  text-decoration: none;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.2s;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: #94a3b8;
-  min-width: 0;
-}
-
-.backup-link:hover {
-  opacity: 1;
-}
-
-#backupPath {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 160px;
-}
-
 .btn-view {
   background: #6366f1;
   color: #ffffff;
@@ -512,14 +463,42 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* Settings row */
-.settings-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Settings bar */
+.settings-bar {
   padding: 10px 16px;
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;
+}
+
+.backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.folder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #64748b;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.folder-btn:hover {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.folder-path {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .toggle-label {
   display: flex;
@@ -570,11 +549,11 @@ body {
   margin-left: auto;
 }
 @media (prefers-color-scheme: dark) {
-  .settings-row { background: #1e1e2e; border-top-color: #3d3d50; }
+  .settings-bar { background: #1e1e2e; border-top-color: #3d3d50; }
   .toggle-label { color: #94a3b8; }
   .toggle-slider { background: #4d4d60; }
   .toggle-text { color: #e2e8f0; }
   .toggle-hint { color: #64748b; }
-  .backup-toggle { color: #94a3b8; }
-  .backup-link { color: #94a3b8; }
+  .folder-btn { color: #94a3b8; }
+  .folder-btn:hover { background: #3d3d50; color: #e2e8f0; }
 }
