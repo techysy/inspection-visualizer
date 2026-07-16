@@ -42,8 +42,13 @@ btnOpenBackup.addEventListener('click', () => {
   const text = btnOpenBackup.dataset.fullPath;
   if (text) {
     navigator.clipboard.writeText(text).then(() => {
-      btnOpenBackup.style.opacity = '1';
-      setTimeout(() => { btnOpenBackup.style.opacity = ''; }, 1200);
+      const orig = btnOpenBackup.title;
+      btnOpenBackup.title = '已复制 ✓';
+      btnOpenBackup.style.color = '#10b981';
+      setTimeout(() => {
+        btnOpenBackup.title = orig;
+        btnOpenBackup.style.color = '';
+      }, 1500);
     });
   }
 });
