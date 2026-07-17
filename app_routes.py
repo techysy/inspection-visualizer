@@ -305,7 +305,7 @@ main = Blueprint('main', __name__)
 # ──────────────────────── 鉴权 ────────────────────────
 
 PUBLIC_ROUTES = {'login', 'api_login', 'api_auth_status', 'static'}
-ADMIN_ROUTES = {'inspectors', 'inspector_add', 'inspector_edit', 'inspector_delete', 'ocr_admin', 'bulk_import', 'objects', 'object_add', 'object_edit', 'object_delete', 'object_clone'}
+ADMIN_ROUTES = {'inspectors', 'inspector_add', 'inspector_edit', 'inspector_delete', 'ocr_admin', 'bulk_import', 'objects', 'object_add', 'object_edit', 'object_delete', 'object_clone', 'backup_gallery_page', 'api_backup_gallery', 'serve_backup_image'}
 
 def _check_request_auth():
     """检查请求是否已认证（session 或请求体中的 username+password）"""
@@ -3664,6 +3664,44 @@ def api_ocr_test():
     return jsonify({'raw_lines': raw_lines, 'config': config})
 
 
+@main.route('/api/backup/gallery')
+def api_backup_gallery():
+    """获取备份截图列表（按日期分组）"""
+    backup_base = Path(__file__).parent / 'backup'
+    if not backup_base.exists():
+        return jsonify({'folders': []})
+    folders = []
+    for folder in sorted(backup_base.iterdir(), reverse=True):
+        if not folder.is_dir() or not folder.name.isdigit():
+            continue
+        images = []
+        for img in sorted(folder.iterdir()):
+            if img.suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.webp'):
+                images.append({
+                    'name': img.name,
+                    'size': img.stat().st_size,
+                    'url': f'/backup/{folder.name}/{img.name}'
+                })
+        if images:
+            date_str = f'{folder.name[:4]}-{folder.name[4:6]}-{folder.name[6:8]}'
+            folders.append({'date': date_str, 'folder': folder.name, 'count': len(images), 'images': images})
+    return jsonify({'folders': folders})
+
+
+@main.route('/backup/<path:folder>/<filename>')
+def serve_backup_image(folder, filename):
+    """提供备份图片访问"""
+    from flask import send_from_directory
+    backup_dir = Path(__file__).parent / 'backup' / folder
+    return send_from_directory(str(backup_dir), filename)
+
+
+@main.route('/backup-gallery')
+def backup_gallery_page():
+    """截图预览页面"""
+    return render_template('backup_gallery.html')
+
+
 @main.route('/api/backup-today-path')
 def api_backup_today_path():
     """获取今日备份文件夹绝对路径"""
@@ -3864,6 +3902,10 @@ def api_save():
                     calc_result = calc_config.get('result_name', '')
                     # 去掉计算类指标和 extra_labels（如在线率，OCR 无法直接识别）
                     required_labels.discard(calc_result)
+                    # 去掉增量类指标（由保存时自动计算，OCR 不识别）
+                    for c in (matched_dtype_check.get('calc_configs') or []):
+                        if c.get('type') == 'increment' and c.get('result_name'):
+                            required_labels.discard(c['result_name'])
                     for extra in matched_dtype_check.get('extra_labels', []):
                         required_labels.discard(extra)
                     parsed_keys = set(parsed_metrics.keys())
@@ -3964,6 +4006,7 @@ def api_save():
                 timestamp=timestamp
             )
             db.add(record)
+            db.flush()  # 分配 record.id，确保后续查询排除自身
 
             # 增量计算（与上一条记录对比）
             if matched_dtype:
@@ -3991,22 +4034,19 @@ def api_save():
                                 if prev_record and prev_record.metrics:
                                     prev_metrics = json.loads(prev_record.metrics) if isinstance(prev_record.metrics, str) else prev_record.metrics
                                     pv = prev_metrics.get(source_field)
-                                    if pv is not None:
-                                        prev_num = float(str(pv).rstrip('%'))
-                                        increment = curr_num - prev_num
-                                        # 按天数平滑：间隔>1天时除以天数
-                                        gap_days = (record.timestamp - prev_record.timestamp).total_seconds() / 86400
-                                        if gap_days > 1:
-                                            increment = increment / gap_days
-                                    else:
-                                        increment = 0
+                                    prev_num = float(str(pv).rstrip('%')) if pv is not None else 0
+                                    increment = curr_num - prev_num
+                                    # 按天数平滑：间隔>1天时除以天数
+                                    gap_days = (record.timestamp - prev_record.timestamp).total_seconds() / 86400
+                                    if gap_days > 1:
+                                        increment = increment / gap_days
                                 else:
                                     # 首条记录，无对比基准，增量为0
                                     increment = 0
                                 increment = round(increment, 1)
                                 parsed_metrics[result_name] = increment
                                 record.metrics = json.dumps(parsed_metrics, ensure_ascii=False)
-                                logger.info(f'  SAVE: 增量计算 {result_name} = {curr_val} - {prev_val} = {increment}')
+                                logger.info(f'  SAVE: 增量计算 {result_name} = {curr_num} - prev = {increment}')
                                 # 自动创建增量指标配置
                                 existing_metrics = {m.key: m for m in db.query(ObjectMetric).filter_by(object_id=obj.id).all()}
                                 if result_name not in existing_metrics:
