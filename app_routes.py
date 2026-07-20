@@ -1507,7 +1507,7 @@ def index():
                 InspectionRecord.timestamp >= today)
             if not _is_admin and _inspector_id:
                 today_baseq = today_baseq.filter(InspectionRecord.inspector_id.in_([_inspector_id, None]))
-            today_record = today_baseq.first()
+            today_record = today_baseq.order_by(InspectionRecord.timestamp.desc()).first()
             # 获取指标配置
             metrics = db.query(ObjectMetric).filter_by(object_id=obj.id).all()
             metric_list = [{'key': m.key, 'name': m.name, 'unit': m.unit, 'show_in_chart': m.show_in_chart} for m in metrics]
