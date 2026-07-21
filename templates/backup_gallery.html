@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}截图预览{% endblock %}
+{% block content %}
+<div style="max-width:1200px;margin:0 auto;padding:1.5rem;">
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+        <h3 style="color:var(--text-heading);font-weight:600;margin:0;">
+            截图预览
+            <small id="totalCount" style="color:var(--text-muted);font-size:0.85rem;font-weight:400;margin-left:0.5rem;"></small>
+        </h3>
+        <div style="margin-left:auto;display:flex;gap:0.5rem;">
+            <button id="viewAll" onclick="setView('all')" class="gallery-view-btn active">全部</button>
+            <button id="viewDate" onclick="setView('date')" class="gallery-view-btn">按日期</button>
+        </div>
+    </div>
+    <div id="galleryContainer" style="color:var(--text-muted);">加载中...</div>
+</div>
+
+
+
+<style>
+.gallery-view-btn { padding:0.35rem 0.9rem;font-size:0.8rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-secondary);cursor:pointer;transition:all 0.15s; }
+.gallery-view-btn.active { background:var(--primary);color:#fff;border-color:var(--primary); }
+.gallery-date { color:var(--text-heading);font-size:1.1rem;font-weight:600;margin:1.5rem 0 0.75rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border); }
+.gallery-date small { color:var(--text-muted);font-size:0.8rem;font-weight:400;margin-left:0.5rem; }
+.gallery-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:0.75rem;align-items:end; }
+.gallery-card { border-radius:10px;overflow:hidden;border:1px solid var(--border);background:var(--bg-elevated); }
+.gallery-card img { width:100%;display:block;background:var(--bg-muted); }
+.gallery-card-info { padding:0.5rem 0.6rem;font-size:0.75rem;color:var(--text-muted);display:flex;justify-content:space-between; }
+.gallery-card-date { padding:0.25rem 0.6rem;font-size:0.7rem;color:var(--primary);background:var(--primary-soft);border-radius:0 0 10px 10px;margin-top:-1px; }
+</style>
+
+<script>
+var allImages = [];
+var currentView = 'all';
+
+fetch('/api/backup/gallery').then(function(r){return r.json()}).then(function(data) {
+    if (!data.folders || data.folders.length === 0) {
+        document.getElementById('galleryContainer').innerHTML = '<p style="color:var(--text-muted);">暂无备份截图</p>';
+        return;
+    }
+    var total = 0;
+    data.folders.forEach(function(folder) {
+        total += folder.count;
+        folder.images.forEach(function(img) {
+            var sizeKB = (img.size / 1024).toFixed(1);
+            allImages.push({ url: img.url, name: img.name, size: sizeKB, date: folder.date });
+        });
+    });
+    document.getElementById('totalCount').textContent = '共 ' + total + ' 张';
+    renderView();
+});
+
+function renderView() {
+    var container = document.getElementById('galleryContainer');
+    var today = new Date();
+    var todayStr = String(today.getFullYear()) + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    var todayImages = allImages.filter(function(img) { return img.date === todayStr; }).reverse();
+    var otherImages = allImages.filter(function(img) { return img.date !== todayStr; });
+
+    if (currentView === 'all') {
+        var html = '';
+        // 今日截图置顶
+        if (todayImages.length > 0) {
+            html += '<div class="gallery-date" style="color:var(--primary);">今日截图 <small>' + todayImages.length + ' 张</small></div>';
+            html += '<div class="gallery-grid">';
+            todayImages.forEach(function(img) {
+                var idx = allImages.indexOf(img);
+                html += '<div class="gallery-card">';
+                html += '<img src="' + img.url + '" loading="lazy" alt="' + img.name + '">';
+                html += '<div class="gallery-card-info"><span>' + img.name + '</span><span>' + img.size + ' kB</span></div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        // 历史截图
+        if (otherImages.length > 0) {
+            html += '<div class="gallery-date">历史截图 <small>' + otherImages.length + ' 张</small></div>';
+            html += '<div class="gallery-grid">';
+            otherImages.forEach(function(img) {
+                var idx = allImages.indexOf(img);
+                html += '<div class="gallery-card">';
+                html += '<img src="' + img.url + '" loading="lazy" alt="' + img.name + '">';
+                html += '<div class="gallery-card-info"><span>' + img.name + '</span><span>' + img.size + ' kB</span></div>';
+                html += '<div class="gallery-card-date">' + img.date + '</div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        container.innerHTML = html;
+    } else {
+        var groups = {};
+        allImages.forEach(function(img, idx) {
+            if (!groups[img.date]) groups[img.date] = [];
+            groups[img.date].push({ img: img, idx: idx });
+        });
+        var html = '';
+        Object.keys(groups).sort().reverse().forEach(function(date) {
+            var items = groups[date];
+            html += '<div class="gallery-date">' + date + ' <small>' + items.length + ' 张</small></div>';
+            html += '<div class="gallery-grid">';
+            items.forEach(function(item) {
+                html += '<div class="gallery-card">';
+                html += '<img src="' + item.img.url + '" loading="lazy" alt="' + item.img.name + '">';
+                html += '<div class="gallery-card-info"><span>' + item.img.name + '</span><span>' + item.img.size + ' kB</span></div>';
+                html += '</div>';
+            });
+            html += '</div>';
+        });
+        container.innerHTML = html;
+    }
+}
+
+function setView(v) {
+    currentView = v;
+    document.getElementById('viewAll').className = 'gallery-view-btn' + (v === 'all' ? ' active' : '');
+    document.getElementById('viewDate').className = 'gallery-view-btn' + (v === 'date' ? ' active' : '');
+    renderView();
+}
+</script>
+{% endblock %}
