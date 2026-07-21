@@ -1560,10 +1560,8 @@ def index():
                 'skip_location': skip_location,
                 'sort_order': obj.sort_order or 0,
             })
-        # 按同类设备数量降序排列，再按 sort_order 排序
-        from collections import Counter
-        type_counts = Counter(obj.device_type or '其他' for obj in objects)
-        object_data.sort(key=lambda x: (-type_counts.get(x['object'].device_type or '其他', 0), x['object'].device_type or '', x['sort_order']))
+        # 已巡检的排前面，未巡检的排后面；各自分组内按 sort_order 排序
+        object_data.sort(key=lambda x: (0 if x['today_record'] else 1, x['sort_order']))
         # 收集所有不重复的 device_type 和 location
         all_types = sorted(set(
             obj.device_type for obj in objects if obj.device_type
