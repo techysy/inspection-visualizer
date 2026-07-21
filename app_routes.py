@@ -1564,7 +1564,13 @@ def index():
                 'sort_order': obj.sort_order or 0,
             })
         # 已巡检的排前面，未巡检的排后面；各自分组内按 sort_order 排序
-        object_data.sort(key=lambda x: (0 if x['today_record'] else 1, x['sort_order']))
+        # 如果全部已巡检，按 异常 > 需关注 > 正常 排序
+        has_uninspected = any(not x['today_record'] for x in object_data)
+        _status_priority = {'异常': 0, '需关注': 1, '正常': 2}
+        if has_uninspected:
+            object_data.sort(key=lambda x: (0 if x['today_record'] else 1, x['sort_order']))
+        else:
+            object_data.sort(key=lambda x: (_status_priority.get(x['today_record'].result, 9), x['sort_order']))
         # 收集所有不重复的 device_type 和 location
         all_types = sorted(set(
             obj.device_type for obj in objects if obj.device_type
