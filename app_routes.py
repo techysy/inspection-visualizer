@@ -826,13 +826,14 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
             # 支持格式：标签 数字、标签：数字、标签(数字)、标签（数字）
             sep = r'\s*[(\（]?\s*[·.:：]?\s*'
             end = r'\s*[)\）]?'
-            search_pattern = rf'{re.escape(label)}{sep}([\d.]+){end}\s*([万亿]?)'
+            search_pattern = rf'{re.escape(label)}{sep}([\d.]+)(%?){end}\s*([万亿]?)'
             if number_before_label:
-                search_pattern = rf'([\d.]+)\s*([万亿]?)\s*{sep}{re.escape(label)}{end}'
+                search_pattern = rf'([\d.]+)(%?)\s*([万亿]?)\s*{sep}{re.escape(label)}{end}'
             for m in re.finditer(search_pattern, line):
                 matched_label = label_map[label]
                 raw = m.group(1)
-                unit = m.group(2) if len(m.groups()) >= 2 else ''
+                pct = m.group(2) if len(m.groups()) >= 2 else ''
+                unit = m.group(3) if len(m.groups()) >= 3 else ''
                 if unit == '万':
                     matched_val = int(float(raw) * 10000)
                 elif unit == '亿':
@@ -841,6 +842,8 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
                     matched_val = float(raw)
                 else:
                     matched_val = int(float(raw))
+                if pct == '%':
+                    matched_val = str(matched_val) + '%'
                 metrics[matched_label] = matched_val
                 logger.info(f'  PARSE: {matched_label}={matched_val}')
 
