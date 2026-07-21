@@ -58,6 +58,9 @@
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'main.inspectors' %}active{% endif %}" href="/inspectors">人员管理</a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'main.backup_gallery_page' %}active{% endif %}" href="/backup-gallery">截图预览</a>
+                    </li>
                     {% endif %}
                 </ul>
                 <div class="d-flex align-items-center gap-2">

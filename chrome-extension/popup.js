@@ -39,18 +39,7 @@ fetch(API_BASE + '/api/backup-today-path').then(r => r.json()).then(d => {
 }).catch(() => {});
 
 btnOpenBackup.addEventListener('click', () => {
-  const text = btnOpenBackup.dataset.fullPath;
-  if (text) {
-    navigator.clipboard.writeText(text).then(() => {
-      const orig = btnOpenBackup.title;
-      btnOpenBackup.title = '已复制 ✓';
-      btnOpenBackup.style.color = '#10b981';
-      setTimeout(() => {
-        btnOpenBackup.title = orig;
-        btnOpenBackup.style.color = '';
-      }, 1500);
-    });
-  }
+  chrome.tabs.create({ url: API_BASE + '/backup-gallery' });
 });
 
 function isLoggedIn() { return !!window.__authToken; }

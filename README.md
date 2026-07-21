@@ -8,6 +8,7 @@
 
 - 📷 **截图识别**：支持 Ctrl+V 粘贴、拖拽、点击上传巡检表单截图
 - 🔌 **Chrome 扩展**：浏览器插件框选页面区域截图并自动识别，无需切换页面
+- 🖼️ **截图预览**：按日期分组展示备份截图，支持缩略图和 Lightbox 全屏浏览
 - 🔬 **OCR 识别**：基于 RapidOCR 自动提取位置、监控点数据、在线率等信息
 - 📊 **仪表盘解析**：支持自定义仪表盘类型，自动识别并提取结构化指标，支持分类管理
 - ⚙️ **指标配置**：为每个巡检对象配置需要跟踪的指标（名称、单位），可单独开关是否参与图表可视化
@@ -309,6 +310,7 @@ SQLite 数据库 `inspection_data.db`，包含四张表：
 | `/api/inspection_history/delete/<id>` | POST | 🗑️ 删除巡检记录 |
 | `/api/records/backfill` | POST | 🔄 回填历史记录（补全缺失的总数/离线） |
 | `/api/records/backfill-increment` | POST | 📈 回填增量指标（按天数平滑，首条为0） |
+| `/api/backup/gallery` | GET | 🖼️ 获取备份截图列表（按日期分组） |
 | `/api/records/cleanup` | POST | 🧹 清理错误的总数/离线字段 |
 | `/api/records/compute` | POST | 🧮 计算补全指标（求和/百分比/差值/自定义公式） |
 | `/api/export/excel` | GET/POST | 📤 导出巡检报告 Excel（含在线率、离线计算） |
