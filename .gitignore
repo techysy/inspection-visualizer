@@ -27,3 +27,5 @@ Thumbs.db
 server.pid
 log/
 backup/
+server.pid
+*.pid
