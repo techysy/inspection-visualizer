@@ -40,6 +40,7 @@
             <div class="autocomplete-dropdown" id="device-type-dropdown" style="display:none;"></div>
         </div>
         <input type="text" class="store-input" name="description" placeholder="描述" style="flex:1 1 100px;min-width:0;">
+        <input type="text" class="store-input" name="project_url" placeholder="项目网址" style="flex:1 1 120px;min-width:0;">
         <button type="submit" class="store-add-btn">添加</button>
     </form>
 </div>
@@ -172,6 +173,10 @@
                             <div class="col-12">
                                 <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">描述</label>
                                 <input type="text" class="form-control" name="description" value="{{ obj.description or '' }}" style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">项目网址</label>
+                                <input type="text" class="form-control" name="project_url" value="{{ obj.project_url or '' }}" placeholder="https://..." style="background: var(--bg-input); border: 1px solid var(--border-input); color: var(--text); border-radius: 10px; padding: 0.6rem 1rem;">
                             </div>
                             <div class="col-12" id="threshold-section-{{ obj.id }}" style="border-top:1px solid var(--border);padding-top:0.75rem;margin-top:0.25rem;">
                                 <label class="form-label" style="color: var(--text-secondary); font-size: 0.85rem;">状态判定阈值</label>

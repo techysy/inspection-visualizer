@@ -2084,6 +2084,7 @@ def object_add():
     location = request.form.get('location', '').strip() or None
     device_type = request.form.get('device_type', '').strip() or None
     description = request.form.get('description', '').strip() or None
+    project_url = request.form.get('project_url', '').strip() or None
 
     if not name:
         flash('名称不能为空', 'danger')
@@ -2091,7 +2092,7 @@ def object_add():
 
     session = SessionLocal()
     try:
-        obj = InspectionObject(name=name, location=location, device_type=device_type, description=description)
+        obj = InspectionObject(name=name, location=location, device_type=device_type, description=description, project_url=project_url)
         session.add(obj)
         session.commit()
         # 双向同步
@@ -2125,6 +2126,7 @@ def object_edit(object_id):
         device_type = request.form.get('device_type', '').strip() or None
         status = request.form.get('status', '').strip() or 'active'
         description = request.form.get('description', '').strip() or None
+        project_url = request.form.get('project_url', '').strip() or None
 
         if name:
             obj.name = name
@@ -2132,6 +2134,7 @@ def object_edit(object_id):
         obj.device_type = device_type
         obj.status = status
         obj.description = description
+        obj.project_url = project_url
 
         session.commit()
         # 双向同步
@@ -2189,7 +2192,8 @@ def object_clone(object_id):
             location='',
             device_type=src.device_type,
             description=src.description,
-            status=src.status
+            status=src.status,
+            project_url=src.project_url
         )
         session.add(new_obj)
         session.flush()
@@ -3542,6 +3546,7 @@ def api_quick_create_object():
     location = data.get('location', '').strip() or None
     device_type = data.get('device_type', '').strip() or None
     description = data.get('description', '').strip() or None
+    project_url = data.get('project_url', '').strip() or None
 
     session = SessionLocal()
     try:
@@ -3555,7 +3560,7 @@ def api_quick_create_object():
                 msg += f'（位置: {location}）'
             return jsonify({'error': msg, 'id': existing.id}), 409
 
-        obj = InspectionObject(name=name, location=location, device_type=device_type, description=description)
+        obj = InspectionObject(name=name, location=location, device_type=device_type, description=description, project_url=project_url)
         session.add(obj)
         session.commit()
 

@@ -130,7 +130,11 @@
                                 <span class="badge bg-warning" style="font-size:0.72rem;">需关注</span>
                                 {% endif %}
                                 {% else %}
+                                {% if item.object.project_url %}
+                                <a href="{{ item.object.project_url }}" target="_blank" class="badge bg-secondary" style="font-size:0.72rem;text-decoration:none;">未巡检</a>
+                                {% else %}
                                 <span class="badge bg-secondary" style="font-size:0.72rem;">未巡检</span>
+                                {% endif %}
                                 {% endif %}
                             </div>
                             <div class="film-meta">
