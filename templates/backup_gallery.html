@@ -27,7 +27,38 @@
 .gallery-card img { width:100%;display:block;background:var(--bg-muted); }
 .gallery-card-info { padding:0.5rem 0.6rem;font-size:0.75rem;color:var(--text-muted);display:flex;justify-content:space-between; }
 .gallery-card-date { padding:0.25rem 0.6rem;font-size:0.7rem;color:var(--primary);background:var(--primary-soft);border-radius:0 0 10px 10px;margin-top:-1px; }
+.gallery-card { cursor:pointer; }
+.gallery-card:hover { border-color:var(--primary);box-shadow:0 2px 12px rgba(0,0,0,0.08); }
+#lightbox-overlay { display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);justify-content:center;align-items:center;flex-direction:column; }
+#lightbox-overlay.active { display:flex; }
+#lightbox-overlay img { max-width:92vw;max-height:82vh;object-fit:contain;border-radius:6px;box-shadow:0 4px 30px rgba(0,0,0,0.5);user-select:none;cursor:pointer;transition:transform 0.3s ease;transform-origin:center center; }
+#lightbox-overlay img.zoomed { transform:scale(2); }
+#lightbox-overlay .lb-info { color:#ccc;font-size:0.82rem;margin-top:0.6rem;text-align:center; }
+#lightbox-overlay .lb-zoom-hint { position:absolute;bottom:1rem;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.5);font-size:0.75rem;display:flex;align-items:center;gap:0.4rem; }
+#lightbox-overlay .lb-close { position:absolute;top:1rem;right:1.5rem;color:#fff;font-size:1.8rem;cursor:pointer;background:none;border:none;line-height:1;opacity:0.7;transition:opacity 0.15s; }
+#lightbox-overlay .lb-close:hover { opacity:1; }
+#lightbox-overlay .lb-nav { position:absolute;top:50%;transform:translateY(-50%);color:#fff;font-size:2.2rem;cursor:pointer;background:none;border:none;opacity:0.6;transition:opacity 0.15s;padding:1rem; }
+#lightbox-overlay .lb-nav:hover { opacity:1; }
+#lightbox-overlay .lb-prev { left:0.5rem; }
+#lightbox-overlay .lb-next { right:0.5rem; }
 </style>
+
+<div id="lightbox-overlay">
+    <button class="lb-close" onclick="closeLightbox()">&times;</button>
+    <button class="lb-nav lb-prev" onclick="navLightbox(-1)">&#10094;</button>
+    <img id="lb-img" src="" alt="" onclick="toggleZoom()">
+    <div class="lb-info" id="lb-info"></div>
+    <button class="lb-nav lb-next" onclick="navLightbox(1)">&#10095;</button>
+    <div class="lb-zoom-hint">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <line x1="11" y1="8" x2="11" y2="14"/>
+            <line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+        点击图片放大
+    </div>
+</div>
 
 <script>
 var allImages = [];
@@ -65,7 +96,7 @@ function renderView() {
             html += '<div class="gallery-grid">';
             todayImages.forEach(function(img) {
                 var idx = allImages.indexOf(img);
-                html += '<div class="gallery-card">';
+                html += '<div class="gallery-card" onclick="openLightbox(\'' + img.url.replace(/'/g,"\\'") + '\',\'' + img.name.replace(/'/g,"\\'") + '\',\'' + img.date + '\')">';
                 html += '<img src="' + img.url + '" loading="lazy" alt="' + img.name + '">';
                 html += '<div class="gallery-card-info"><span>' + img.name + '</span><span>' + img.size + ' kB</span></div>';
                 html += '</div>';
@@ -78,7 +109,7 @@ function renderView() {
             html += '<div class="gallery-grid">';
             otherImages.forEach(function(img) {
                 var idx = allImages.indexOf(img);
-                html += '<div class="gallery-card">';
+                html += '<div class="gallery-card" onclick="openLightbox(\'' + img.url.replace(/'/g,"\\'") + '\',\'' + img.name.replace(/'/g,"\\'") + '\',\'' + img.date + '\')">';
                 html += '<img src="' + img.url + '" loading="lazy" alt="' + img.name + '">';
                 html += '<div class="gallery-card-info"><span>' + img.name + '</span><span>' + img.size + ' kB</span></div>';
                 html += '<div class="gallery-card-date">' + img.date + '</div>';
@@ -99,7 +130,7 @@ function renderView() {
             html += '<div class="gallery-date">' + date + ' <small>' + items.length + ' 张</small></div>';
             html += '<div class="gallery-grid">';
             items.forEach(function(item) {
-                html += '<div class="gallery-card">';
+                html += '<div class="gallery-card" onclick="openLightbox(\'' + item.img.url.replace(/'/g,"\\'") + '\',\'' + item.img.name.replace(/'/g,"\\'") + '\',\'' + item.img.date + '\')">';
                 html += '<img src="' + item.img.url + '" loading="lazy" alt="' + item.img.name + '">';
                 html += '<div class="gallery-card-info"><span>' + item.img.name + '</span><span>' + item.img.size + ' kB</span></div>';
                 html += '</div>';
@@ -116,5 +147,68 @@ function setView(v) {
     document.getElementById('viewDate').className = 'gallery-view-btn' + (v === 'date' ? ' active' : '');
     renderView();
 }
+
+var lbList = [];
+var lbIndex = 0;
+
+function openLightbox(url, name, date) {
+    var overlay = document.getElementById('lightbox-overlay');
+    lbList = currentView === 'all' ? allImages : allImages.filter(function(img){ return true; });
+    lbIndex = 0;
+    for (var i = 0; i < lbList.length; i++) {
+        if (lbList[i].url === url) { lbIndex = i; break; }
+    }
+    showLightboxImage();
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function showLightboxImage() {
+    var img = lbList[lbIndex];
+    document.getElementById('lb-img').src = img.url;
+    document.getElementById('lb-info').textContent = img.name + '  (' + img.size + ' kB)  ' + img.date + '  [' + (lbIndex + 1) + '/' + lbList.length + ']';
+}
+
+var isZoomed = false;
+
+function toggleZoom() {
+    var img = document.getElementById('lb-img');
+    isZoomed = !isZoomed;
+    if (isZoomed) {
+        img.classList.add('zoomed');
+    } else {
+        img.classList.remove('zoomed');
+    }
+}
+
+function resetZoom() {
+    isZoomed = false;
+    var img = document.getElementById('lb-img');
+    img.classList.remove('zoomed');
+}
+
+function navLightbox(dir) {
+    resetZoom();
+    lbIndex = (lbIndex + dir + lbList.length) % lbList.length;
+    showLightboxImage();
+}
+
+function closeLightbox() {
+    resetZoom();
+    document.getElementById('lightbox-overlay').classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', function(e) {
+    var overlay = document.getElementById('lightbox-overlay');
+    if (!overlay.classList.contains('active')) return;
+    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowLeft') navLightbox(-1);
+    if (e.key === 'ArrowRight') navLightbox(1);
+});
+
+document.getElementById('lightbox-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeLightbox();
+});
 </script>
 {% endblock %}
