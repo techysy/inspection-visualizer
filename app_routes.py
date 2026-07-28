@@ -1021,7 +1021,7 @@ def parse_dashboard_screenshot(all_text, lines, filename=None):
             continue
         label_name = reverse_label_map.get(key, key)
         status_detail_parts.append(f'{label_name}: {val}')
-    if online_rate:
+    if online_rate and '在线率' not in metrics:
         status_detail_parts.append(f'在线率: {online_rate}')
 
     # 根据 result_rules 判断整体状态
@@ -3759,23 +3759,20 @@ def api_save():
 
     items = data['items']
 
-    # 保存截图备份
+    # 截图备份延迟到保存成功后再执行（备份变量暂存）
     screenshot = data.get('screenshot', '')
+    _backup_pending = False
+    _backup_img_bytes = None
     if screenshot:
         try:
             import base64 as _b64
             img_data = screenshot
             if ',' in img_data:
                 img_data = img_data.split(',', 1)[1]
-            img_bytes = _b64.b64decode(img_data)
-            date_folder = datetime.now().strftime('%Y%m%d')
-            backup_name = f'screenshot_{datetime.now().strftime("%H%M%S")}.png'
-            backup_dir = Path(__file__).parent / 'backup' / date_folder
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            (backup_dir / backup_name).write_bytes(img_bytes)
-            logger.info(f'  BACKUP: 已保存截图 {backup_dir / backup_name}')
+            _backup_img_bytes = _b64.b64decode(img_data)
+            _backup_pending = True
         except Exception as e:
-            logger.warning(f'  BACKUP: 截图备份失败 {e}')
+            logger.warning(f'  BACKUP: 截图解码失败 {e}')
 
     # 用 Flask session 获取当前登录人员（SQLAlchemy session 另用 db 变量避免冲突）
     _login_inspector_id = dict(session).get('inspector_id')
@@ -4111,6 +4108,32 @@ def api_save():
         return jsonify({'error': f'保存失败: {str(e)}'}), 500
     finally:
         db.close()
+
+    # 仅在有成功保存记录时才备份截图（无效/重复数据不备份）
+    if _backup_pending and _backup_img_bytes and saved > 0:
+        try:
+            import hashlib as _hl
+            date_folder = datetime.now().strftime('%Y%m%d')
+            backup_dir = Path(__file__).parent / 'backup' / date_folder
+            backup_dir.mkdir(parents=True, exist_ok=True)
+
+            img_hash = _hl.md5(_backup_img_bytes).hexdigest()
+            is_duplicate = False
+            for existing in backup_dir.glob('*.png'):
+                try:
+                    if _hl.md5(existing.read_bytes()).hexdigest() == img_hash:
+                        logger.info(f'  BACKUP: 跳过重复截图（已存在 {existing.name}）')
+                        is_duplicate = True
+                        break
+                except Exception:
+                    continue
+
+            if not is_duplicate:
+                backup_name = f'screenshot_{datetime.now().strftime("%H%M%S")}.png'
+                (backup_dir / backup_name).write_bytes(_backup_img_bytes)
+                logger.info(f'  BACKUP: 已保存截图 {backup_dir / backup_name}')
+        except Exception as e:
+            logger.warning(f'  BACKUP: 截图备份失败 {e}')
 
     return jsonify({'saved': saved, 'skipped': skipped, 'skipped_duplicate': skipped_duplicate, 'skipped_no_match': skipped_no_match, 'skipped_incomplete': skipped_incomplete, 'skipped_reasons': skipped_reasons, 'created': created, 'object_id': last_object_id})
 

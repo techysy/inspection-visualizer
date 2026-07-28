@@ -3,7 +3,7 @@ cd /d "%~dp0"
 
 echo.
 echo ========================================
-echo   Film Price Tracker
+echo   InspectionTracker
 echo ========================================
 echo.
 
@@ -35,7 +35,7 @@ echo   http://127.0.0.1:5001
 echo   Press Ctrl+C to stop
 echo ========================================
 echo.
-python app.py
+venv\Scripts\python.exe app.py
 
 echo.
 echo Stopped

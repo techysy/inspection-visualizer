@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
     (function(){
-        var t = localStorage.getItem('theme-preference') || 'dark';
+        var t = localStorage.getItem('theme-preference') || 'light';
         document.documentElement.setAttribute('data-theme', t);
         if (t === 'auto') {
             document.documentElement.setAttribute('data-resolved',
@@ -109,7 +109,7 @@
         }
 
         function getSaved() {
-            return localStorage.getItem(STORAGE_KEY) || 'dark';
+            return localStorage.getItem(STORAGE_KEY) || 'light';
         }
 
         function save(t) {

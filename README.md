@@ -9,6 +9,7 @@
 - 📷 **截图识别**：支持 Ctrl+V 粘贴、拖拽、点击上传巡检表单截图
 - 🔌 **Chrome 扩展**：浏览器插件框选页面区域截图并自动识别，无需切换页面
 - 🖼️ **截图预览**：按日期分组展示备份截图，支持缩略图和 Lightbox 全屏浏览
+- 🛡️ **智能截图备份**：仅在巡检记录成功保存后才备份截图，无效/重复数据自动跳过，避免冗余备份
 - 🔬 **OCR 识别**：基于 RapidOCR 自动提取位置、监控点数据、在线率等信息
 - 📊 **仪表盘解析**：支持自定义仪表盘类型，自动识别并提取结构化指标，支持分类管理
 - ⚙️ **指标配置**：为每个巡检对象配置需要跟踪的指标（名称、单位），可单独开关是否参与图表可视化
@@ -65,16 +66,269 @@ python app.py
 ### 💻 方式二：PowerShell 脚本（推荐）
 
 ```powershell
-.\start.ps1                  # 显示交互式菜单
-.\start.ps1 -Action start    # 前台启动
-.\start.ps1 -Action start-bg # 后台启动
-.\start.ps1 -Action stop     # 停止服务
-.\start.ps1 -Action status   # 查看状态
+.\iv-start.ps1                  # 显示交互式菜单
+.\iv-start.ps1 -Action start    # 前台启动
+.\iv-start.ps1 -Action restart  # 重启服务
+.\iv-start.ps1 -Action stop     # 停止服务
+.\iv-start.ps1 -Action status   # 查看状态
 ```
+
+> **注意**：首次运行可能遇到执行策略限制，需先执行：
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+> ```
 
 ### 🖱️ 方式三：CMD 双击启动
 
 双击 `start.bat`，自动创建虚拟环境、安装依赖并启动。
+
+## ⚙️ 开机自启动
+
+### 🪟 Windows
+
+#### 方法一：任务计划程序（推荐）
+
+1. 按 `Win+R`，输入 `taskschd.msc` 打开任务计划程序
+2. 点击右侧「创建基本任务」
+3. 名称填写 `InspectionTracker`，描述填写 `巡检数据可视化服务`
+4. 触发器选择「当用户登录时」
+5. 操作选择「启动程序」
+6. 程序填写：
+   ```
+   C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+   ```
+   参数填写：
+   ```
+   -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\path\to\inspection-visualizer\iv-start.ps1" -Action start
+   ```
+   > 将路径替换为实际项目路径
+7. 勾选「完成后打开属性对话框」
+8. 在「条件」选项卡中，取消勾选「只有在计算机使用交流电源时才启动此任务」
+9. 点击确定完成
+
+#### 方法二：启动文件夹快捷方式
+
+1. 创建 `start.bat` 的快捷方式
+2. 按 `Win+R`，输入 `shell:startup` 打开启动文件夹
+3. 将快捷方式放入该文件夹
+4. 重启电脑验证服务自动启动
+
+#### 方法三：注册为 Windows 服务（高级）
+
+使用 [NSSM](https://nssm.cc/) 将应用注册为系统服务：
+
+```powershell
+# 下载 NSSM
+choco install nssm  # 或从 https://nssm.cc/download 手动下载
+
+# 注册服务
+nssm install InspectionTracker "C:\path\to\inspection-visualizer\venv\Scripts\python.exe" "app.py"
+nssm set InspectionTracker AppDirectory "C:\path\to\inspection-visualizer"
+nssm set InspectionTracker DisplayName "InspectionTracker - 巡检数据可视化"
+nssm set InspectionTracker Description "IT运维巡检数据可视化服务"
+nssm set InspectionTracker Start SERVICE_AUTO_START
+
+# 启动服务
+nssm start InspectionTracker
+
+# 管理命令
+nssm stop InspectionTracker
+nssm restart InspectionTracker
+nssm remove InspectionTracker confirm  # 卸载
+```
+
+### 🐧 Linux
+
+#### 方法一：systemd 服务（推荐）
+
+1. 创建服务文件：
+
+```bash
+sudo tee /etc/systemd/system/inspection-tracker.service << 'EOF'
+[Unit]
+Description=InspectionTracker - IT运维巡检数据可视化
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/inspection-visualizer
+ExecStart=/opt/inspection-visualizer/venv/bin/python app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/inspection-visualizer
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+2. 部署项目并安装依赖：
+
+```bash
+# 克隆项目
+sudo mkdir -p /opt/inspection-visualizer
+sudo git clone https://github.com/your-repo/inspection-visualizer.git /opt/inspection-visualizer
+
+# 创建虚拟环境
+cd /opt/inspection-visualizer
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+
+# 设置权限
+sudo chown -R www-data:www-data /opt/inspection-visualizer
+```
+
+3. 配置环境变量：
+
+```bash
+sudo tee /opt/inspection-visualizer/.env << 'EOF'
+APP_PASSWORD=your_password_here
+SECRET_KEY=your_secret_key_here
+EOF
+
+sudo chown www-data:www-data /opt/inspection-visualizer/.env
+sudo chmod 600 /opt/inspection-visualizer/.env
+```
+
+4. 启动服务：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable inspection-tracker
+sudo systemctl start inspection-tracker
+
+# 查看状态
+sudo systemctl status inspection-tracker
+
+# 查看日志
+sudo journalctl -u inspection-tracker -f
+```
+
+#### 方法二：简单 Shell 脚本 + crontab
+
+创建启动脚本：
+
+```bash
+#!/bin/bash
+# /opt/inspection-visualizer/start.sh
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PID_FILE="$SCRIPT_DIR/server.pid"
+LOG_FILE="$SCRIPT_DIR/log/app.log"
+VENV_PYTHON="$SCRIPT_DIR/venv/bin/python"
+
+cd "$SCRIPT_DIR"
+
+# 检查是否已在运行
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "Server already running (PID: $OLD_PID)"
+        exit 0
+    fi
+    rm -f "$PID_FILE"
+fi
+
+# 启动服务
+mkdir -p log
+nohup "$VENV_PYTHON" app.py >> "$LOG_FILE" 2>&1 &
+echo $! > "$PID_FILE"
+echo "Server started (PID: $!)"
+```
+
+设置开机自启：
+
+```bash
+chmod +x /opt/inspection-visualizer/start.sh
+
+# 添加到 crontab
+crontab -e
+# 添加以下行（@reboot 在开机时执行）
+@reboot /opt/inspection-visualizer/start.sh
+```
+
+#### 方法三：Supervisor 进程管理
+
+```bash
+# 安装 supervisor
+sudo apt install supervisor
+
+# 创建配置
+sudo tee /etc/supervisor/conf.d/inspection-tracker.conf << 'EOF'
+[program:inspection-tracker]
+command=/opt/inspection-visualizer/venv/bin/python app.py
+directory=/opt/inspection-visualizer
+user=www-data
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/inspection-tracker.err.log
+stdout_logfile=/var/log/inspection-tracker.out.log
+environment=PYTHONUNBUFFERED="1"
+EOF
+
+# 启动
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start inspection-tracker
+
+# 管理命令
+sudo supervisorctl status inspection-tracker
+sudo supervisorctl restart inspection-tracker
+sudo supervisorctl stop inspection-tracker
+```
+
+### 🍓 树莓派 / 嵌入式 Linux
+
+适用于树莓派等低功耗设备，使用 systemd 服务 + 轻量配置：
+
+```bash
+# 克隆项目
+git clone https://github.com/your-repo/inspection-visualizer.git
+cd inspection-visualizer
+
+# 创建虚拟环境并安装依赖
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+
+# 创建服务
+sudo tee /etc/systemd/system/inspection-tracker.service << EOF
+[Unit]
+Description=InspectionTracker
+After=network.target
+
+[Service]
+Type=simple
+User=$(whoami)
+WorkingDirectory=$(pwd)
+ExecStart=$(pwd)/venv/bin/python app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 启用并启动
+sudo systemctl daemon-reload
+sudo systemctl enable inspection-tracker
+sudo systemctl start inspection-tracker
+```
+
+### 🔒 安全建议
+
+无论使用哪种自启动方式，建议：
+
+1. **不要以 root 运行**：创建专用用户（如 `www-data`）运行服务
+2. **保护 `.env` 文件**：设置权限 `chmod 600 .env`
+3. **配置防火墙**：仅允许内网访问 5001 端口
+4. **使用反向代理**：生产环境建议 Nginx/Caddy 反向代理，启用 HTTPS
+5. **定期备份数据库**：`inspection_data.db` 文件
 
 ### 🔌 Chrome 扩展安装
 
@@ -173,8 +427,9 @@ inspection-visualizer/
 ├── app_routes.py           # 路由（首页/详情/点位管理/人员管理/截图OCR/指标API）
 ├── config.py               # 配置（DB URI, Secret Key）
 ├── requirements.txt        # Python 依赖
-├── start.ps1               # PowerShell 启动脚本（交互式菜单）
 ├── start.bat               # CMD 启动脚本
+├── iv-start.ps1            # PowerShell 启动脚本（交互式菜单）
+├── iv-start.ps1            # PowerShell 启动脚本（交互式菜单）
 ├── dashboard_types.json    # 仪表盘类型配置（关键词/标签映射/结果规则）
 ├── ocr_config.json         # OCR 引擎参数配置
 ├── global_vars.json        # 全局变量配置（跳过关键词等）

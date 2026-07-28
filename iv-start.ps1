@@ -96,7 +96,8 @@ function Start-Server {
     Write-Host ""
     Write-Host "Starting Flask server..." -ForegroundColor Yellow
 
-    $process = Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $scriptPath -NoNewWindow -PassThru
+    $pythonExe = "$scriptPath\venv\Scripts\python.exe"
+    $process = Start-Process -FilePath $pythonExe -ArgumentList "app.py" -WorkingDirectory $scriptPath -NoNewWindow -PassThru
     $process.Id | Out-File -FilePath $pidFile -Encoding UTF8
     Start-Sleep -Seconds 2
 
@@ -142,7 +143,8 @@ function Restart-Server {
     Write-Host ""
     Write-Host "Starting Flask server..." -ForegroundColor Yellow
 
-    $process = Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $scriptPath -NoNewWindow -PassThru
+    $pythonExe = "$scriptPath\venv\Scripts\python.exe"
+    $process = Start-Process -FilePath $pythonExe -ArgumentList "app.py" -WorkingDirectory $scriptPath -NoNewWindow -PassThru
     $process.Id | Out-File -FilePath $pidFile -Encoding UTF8
     Start-Sleep -Seconds 2
 
