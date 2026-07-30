@@ -1,0 +1,2 @@
+# DS-AT1000S 自动巡检集成依赖（纯 Python 标准库，无额外依赖）
+# 脚本仅使用 urllib / xml.etree / json / logging / argparse 等标准库模块

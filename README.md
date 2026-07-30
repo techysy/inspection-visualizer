@@ -608,6 +608,49 @@ OCR 识别的指标自动解析为 JSON 存储，如：
 
 配合对象的指标配置，可在详情页展示结构化数据和趋势图表。
 
+## 🤖 自动数据采集
+
+除了手动截图 OCR，Inspection Visualizer 还支持通过 API 接收第三方系统自动推送的巡检数据。内置集成脚本可直接对接设备 ISAPI 接口，实现无人值守的自动巡检。
+
+### 已支持的集成
+
+| 集成 | 目标设备 | 协议 | 文档 |
+|------|---------|------|------|
+| [DS-AT1000S](integrations/dsat1000s/) | 海康智能分析存储服务器 | ISAPI (HTTP) | [📖 文档](integrations/dsat1000s/README.md) |
+
+### 工作原理
+
+```
+设备 ISAPI 接口
+      │
+      ▼
+集成脚本 (integrations/<设备>/)
+  采集硬件/存储/网络状态
+  自动判定正常/异常/需关注
+      │
+      ▼
+POST /api/records/import
+      │
+      ▼
+Inspection Visualizer 数据库
+      │
+      ▼
+Web 端趋势图表 + 历史记录
+```
+
+### 添加新集成
+
+集成目录统一放在 `integrations/<设备名>/`，遵循以下约定：
+
+- `README.md` — 安装配置文档
+- `.env.example` — 配置模板
+- `<设备名>_to_iv.py` — 采集脚本（标准库依赖，无额外 pip 包）
+- `requirements.txt` — 额外依赖说明（如有）
+
+采集脚本通过 POST `/api/records/import` 接口写入巡检记录，接口接受的字段见 [批量导入 API](#-批量导入)。
+
+欢迎贡献新的设备集成！
+
 ## 📝 更新日志
 
 详见 [ChangeLog.md](ChangeLog.md)
