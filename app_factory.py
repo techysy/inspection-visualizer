@@ -7,6 +7,10 @@ def create_app(config_name='default'):
     app.config.from_object(config[config_name])
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', app.config['SECRET_KEY'])
 
+    # 非 debug 模式下也自动重载模板，避免每次改模板都要重启服务
+    app.jinja_env.auto_reload = True
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+
     from models.inspection import init_db
     init_db()
 

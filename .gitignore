@@ -30,3 +30,4 @@ backup/
 server.pid
 *.pid
 /.qoder
+/.workbuddy

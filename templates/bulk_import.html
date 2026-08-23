@@ -6,11 +6,11 @@
 <h1 class="mb-4">数据导入导出</h1>
 
 <div class="row g-4">
-    <div class="col-md-7">
+    <div class="col-md-9">
         <div class="card h-100">
             <div class="card-body">
                 <h5 class="card-title">导入巡检记录</h5>
-                <p class="card-text mb-3">支持粘贴 Markdown 表格、CSV 数据或上传 .md / .json 文件</p>
+                <p class="card-text mb-3">支持粘贴 Markdown 表格、CSV 数据或上传 .md / .csv / .json 文件</p>
 
                 <div id="drop-zone" class="drop-zone mb-3">
                     <div class="drop-zone-content">
@@ -18,10 +18,10 @@
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                             <polyline points="14 2 14 8 20 8"/>
                         </svg>
-                        <p>拖入 .md 或 .json 文件或点击选择</p>
-                        <small class="text-muted">支持 Markdown 巡检日报文件和 JSON 数据文件</small>
+                        <p>拖入 .md / .csv / .json 文件或点击选择</p>
+                        <small class="text-muted">支持 Markdown 巡检日报、智慧城管 CSV 和 JSON 数据文件</small>
                     </div>
-                    <input type="file" id="file-input" accept=".md,.markdown,.json" style="display:none">
+                    <input type="file" id="file-input" accept=".md,.markdown,.csv,.json" style="display:none">
                 </div>
 
                 <div id="file-info" style="display:none" class="mb-3">
@@ -32,11 +32,13 @@
                     </div>
                 </div>
 
-                <textarea id="records-text" class="import-textarea" rows="12" placeholder="或粘贴数据，支持以下格式：&#10;&#10;Markdown 表格：&#10;| 位置名称 | 巡检时间 | 结果 | 巡检人员 | 状态详情 | 备注 |&#10;|----------|----------|------|----------|----------|------|&#10;| 中江县 | 2024-01-15 10:00 | 正常 | 张三 | 在线率 99% | 无 |&#10;| 三园区垃圾站 | 2024-01-15 11:00 | 异常 | 李四 | 离线5台 | 需检查 |&#10;&#10;CSV 格式（逗号分隔）：&#10;中江县,2024-01-15 10:00,正常,张三,在线率 99%,无&#10;三园区垃圾站,2024-01-15 11:00,异常,李四,离线5台,需检查&#10;&#10;JSON 格式会自动识别并导入"></textarea>
+                <textarea id="records-text" class="import-textarea" rows="12" placeholder="或粘贴数据，支持以下格式：&#10;&#10;Markdown 表格：&#10;| 位置名称 | 巡检时间 | 结果 | 巡检人员 | 状态详情 | 备注 |&#10;|----------|----------|------|----------|----------|------|&#10;| 中江县 | 2024-01-15 10:00 | 正常 | 张三 | 在线率 99% | 无 |&#10;| 三园区垃圾站 | 2024-01-15 11:00 | 异常 | 李四 | 离线5台 | 需检查 |&#10;&#10;CSV 格式（逗号分隔）：&#10;中江县,2024-01-15 10:00,正常,张三,在线率 99%,无&#10;三园区垃圾站,2024-01-15 11:00,异常,李四,离线5台,需检查&#10;&#10;智慧城管平台 CSV（带表头）：&#10;监控点名称,所在区域,IP地址,在线状态,状态变更时间,状态持续时长,录制状态,巡检时间,国标编码,离线原因,资源编码&#10;10号立杆球机,中江县/东江公园,172.16.101.31,离线,2026-03-10 18:41:20,149天15.79小时,--,2026-08-07 10:28:40,,网络超时或设备无响应,&#10;&#10;区域汇总 CSV（一行一个区域，直接透传指标）：&#10;所在区域,监控点总数,在线数,离线数,未检测数,白名单数,在线率&#10;中江县,682,577,105,0,0,84.60%&#10;城管一期,73,67,6,0,0,91.78%&#10;&#10;JSON 格式会自动识别并导入"></textarea>
 
-                <div class="mt-3 d-flex gap-2">
+                <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
                     <button id="btn-parse-records" class="btn btn-primary">识别</button>
+                    <button id="btn-import-records" class="btn btn-success" disabled>确认导入</button>
                     <span id="records-status" class="import-status"></span>
+                    <span id="import-status" class="import-status"></span>
                 </div>
 
                 <div id="preview-area" style="display:none" class="mt-3">
@@ -52,52 +54,18 @@
                             <tbody id="preview-body"></tbody>
                         </table>
                     </div>
-                    <div class="mt-2 d-flex gap-2">
-                        <button id="btn-import-records" class="btn btn-success">确认导入</button>
-                        <span id="import-status" class="import-status"></span>
-                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="col-md-5">
+    <div class="col-md-3">
         <div class="card mb-4">
-            <div class="card-body">
-                <h5 class="card-title">导出数据</h5>
-                <p class="card-text mb-3">导出所有巡检数据为 JSON 文件，可用于备份或迁移</p>
-                <button id="btn-export-json" class="btn btn-primary">导出 JSON</button>
-                <span id="export-status" class="import-status ms-2"></span>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">计数文本导入</h5>
-                <p class="card-text mb-3">粘贴成员/列表文本，每行一个名字，自动去重后导入到指定对象的日列表</p>
-                
-                <div class="mb-3">
-                    <label class="form-label">选择巡检对象</label>
-                    <select id="group-object-select" class="form-select form-select-sm">
-                        <option value="">加载中...</option>
-                    </select>
-                </div>
-                
-                <div class="mb-3">
-                    <label class="form-label">成员列表 <small class="text-muted">（每行一个，支持带序号如 [1] xxx）</small></label>
-                    <textarea id="group-members-text" class="import-textarea" rows="8" placeholder="李安歌&#10;民乐&#10;5.5街-..&#10;五根松.&#10;锦城湖..&#10;SOOS&#10;..."></textarea>
-                </div>
-                
-                <div class="d-flex gap-2 align-items-center">
-                    <button id="btn-import-group" class="btn btn-success">导入</button>
-                    <span id="group-import-status" class="import-status"></span>
-                </div>
-                
-                <div id="group-preview" style="display:none" class="mt-3">
-                    <div class="alert alert-info py-2" style="font-size:0.85rem">
-                        解析到 <strong id="group-preview-count">0</strong> 个成员
-                        <button id="btn-group-confirm" class="btn btn-sm btn-success ms-2">确认导入</button>
-                    </div>
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fw-semibold" style="font-size:0.9rem;">导出</span>
+                    <button id="btn-export-json" class="btn btn-sm btn-outline-secondary">JSON</button>
+                    <span id="export-status" class="import-status"></span>
                 </div>
             </div>
         </div>
@@ -108,6 +76,8 @@
 {% block extra_js %}
 <script>
 (function() {
+    function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
     // ========== JSON 导出 ==========
     document.getElementById('btn-export-json').addEventListener('click', async () => {
         const status = document.getElementById('export-status');
@@ -146,7 +116,7 @@
     function handleFile(file) {
         if (!file) return;
         const ext = file.name.split('.').pop().toLowerCase();
-        if (ext !== 'md' && ext !== 'markdown' && ext !== 'json') { alert('请选择 .md 或 .json 文件'); return; }
+        if (ext !== 'md' && ext !== 'markdown' && ext !== 'csv' && ext !== 'json') { alert('请选择 .md / .csv / .json 文件'); return; }
         const reader = new FileReader();
         reader.onload = (e) => {
             recordsText.value = e.target.result;
@@ -165,6 +135,38 @@
         dropZone.style.display = 'block';
         fileInput.value = '';
     });
+
+    function parseCSV(text) {
+        // 解析 CSV（支持引号包裹、BOM、换行，自动探测逗号/制表符分隔）
+        var src = text.replace(/^\uFEFF/, '');
+        var firstLine = src.split('\n')[0] || '';
+        var delim = firstLine.indexOf('\t') !== -1 ? '\t' : ',';
+        var rows = [];
+        var cells = [];
+        var current = '';
+        var inQuotes = false;
+        for (var i = 0; i < src.length; i++) {
+            var ch = src[i];
+            if (inQuotes) {
+                if (ch === '"') {
+                    if (src[i + 1] === '"') { current += '"'; i++; }
+                    else inQuotes = false;
+                } else current += ch;
+            } else {
+                if (ch === '"') inQuotes = true;
+                else if (ch === delim) { cells.push(current.trim()); current = ''; }
+                else if (ch === '\n' || ch === '\r') {
+                    if (ch === '\r' && src[i + 1] === '\n') i++;
+                    cells.push(current.trim()); current = '';
+                    if (cells.some(function(c) { return c !== ''; })) rows.push(cells);
+                    cells = [];
+                } else current += ch;
+            }
+        }
+        cells.push(current.trim());
+        if (cells.some(function(c) { return c !== ''; })) rows.push(cells);
+        return rows;
+    }
 
     function parseData(text) {
         if (!text.trim()) return [];
@@ -196,11 +198,29 @@
         var lines = trimmed.split('\n');
         var isMarkdown = lines.some(function(line) { return line.trim().startsWith('|'); });
         if (!isMarkdown) {
+            // CSV：若首行为表头且含智慧城管平台列名，则按表头映射
+            var csvRows = parseCSV(trimmed);
+            if (csvRows.length > 0) {
+                var headerLine = (csvRows[0] || []).map(function(c) { return cleanCell(c).toLowerCase(); });
+                // 区域汇总 CSV：所在区域 + 监控点总数 + 在线数 + 在线率
+                var isAgg = headerLine.indexOf('监控点总数') !== -1 && headerLine.indexOf('在线率') !== -1;
+                if (isAgg) {
+                    return { type: 'aggregated', headers: headerLine, rows: csvRows.slice(1) };
+                }
+                var zcgHeaders = ['监控点名称', '所在区域', '在线状态', '巡检时间', '离线原因'];
+                var isZcg = zcgHeaders.some(function(h) {
+                    return headerLine.indexOf(h.toLowerCase()) !== -1;
+                });
+                if (isZcg) {
+                    return { headers: headerLine, rows: csvRows.slice(1) };
+                }
+            }
+            // 普通 CSV：无表头，直接按列返回
             var data = [];
-            for (var li = 0; li < lines.length; li++) {
-                var lineTrimmed = lines[li].trim();
-                if (!lineTrimmed) continue;
-                data.push(lineTrimmed.split(',').map(function(c) { return c.trim(); }));
+            for (var li = 0; li < csvRows.length; li++) {
+                var row = csvRows[li];
+                if (!row) continue;
+                data.push(row);
             }
             return data;
         }
@@ -224,14 +244,14 @@
                 var tbl = tables[ti];
                 if (tbl.length < 2) continue;
                 var headerLine = tbl[0];
-                var headerCells = headerLine.slice(1, -1).split('|').map(function(c) { return c.trim().toLowerCase(); });
+                var headerCells = headerLine.slice(1, -1).split('|').map(function(c) { return cleanCell(c).trim().toLowerCase(); });
                 var isDataTable = headerCells.some(function(h) {
                     return dataHeaders.some(function(kw) { return h.indexOf(kw) !== -1; });
                 });
                 if (!isDataTable) continue;
                 var result = [];
                 for (var rowIdx = 2; rowIdx < tbl.length; rowIdx++) {
-                    var cells = tbl[rowIdx].slice(1, -1).split('|').map(function(c) { return c.trim(); });
+                    var cells = tbl[rowIdx].slice(1, -1).split('|').map(function(c) { return cleanCell(c).trim(); });
                     if (cells.length >= 3 && cells[0]) result.push(cells);
                 }
                 if (result.length > 0) return { headers: headerCells, rows: result };
@@ -244,22 +264,166 @@
     var previewBody = document.getElementById('preview-body');
     var previewCount = document.getElementById('preview-count');
     var cachedRecords = [];
+    var cachedSkipped = [];
+    var btnParseRecords = document.getElementById('btn-parse-records');
+    var btnImportRecords = document.getElementById('btn-import-records');
+    var recordsStatus = document.getElementById('records-status');
+    var importStatus = document.getElementById('import-status');
+
+    // 按 location 匹配已有巡检对象，并对命中行按对象的 dashboard labels 拼装 status_detail
+    function matchAggregatedRows(rawRows, objects, labelsByCategory) {
+        var matched = [], skipped = [];
+        for (var ri = 0; ri < rawRows.length; ri++) {
+            var d = rawRows[ri];
+            var best = null, bestScore = 0;
+            var name = d.area.toLowerCase();
+            for (var oi = 0; oi < objects.length; oi++) {
+                var obj = objects[oi];
+                var loc = (obj.location || '').toLowerCase();
+                if (!loc) continue;
+                var score = 0;
+                if (loc === name) score = 30;
+                else if (name.indexOf(loc) !== -1) score = 20;
+                else if (loc.indexOf(name) !== -1) score = 15;
+                if (score > bestScore) { best = obj; bestScore = score; }
+            }
+            if (best && bestScore > 0) {
+                var labels = (labelsByCategory && best.device_type && labelsByCategory[best.device_type]) || [];
+                matched.push(buildAggregatedRecord(d, labels));
+            } else {
+                skipped.push({ point_name: d.area });
+            }
+        }
+        return { matched: matched, skipped: skipped };
+    }
+
+    function mapResult(val) {
+        var v = String(val || '').trim();
+        if (!v) return '正常';
+        if (v.indexOf('在线') !== -1 || v.indexOf('正常') !== -1) return '正常';
+        if (v.indexOf('离线') !== -1 || v.indexOf('异常') !== -1) return '异常';
+        return '需关注';
+    }
+
+    function findCol(headers, keys) {
+        for (var ki = 0; ki < keys.length; ki++) {
+            for (var hi = 0; hi < headers.length; hi++) {
+                if (headers[hi].indexOf(keys[ki]) !== -1) return hi;
+            }
+        }
+        return -1;
+    }
+    // Excel 导出 CSV 时常把字符串单元格写成 ="xxx" 或 =xxx，这里清理成普通文本
+    function cleanCell(v) {
+        if (v == null) return '';
+        var s = String(v).trim();
+        var original = s;
+        if (s.startsWith('="') && s.endsWith('"')) {
+            s = s.slice(2, -1);
+        } else if (s.startsWith('=')) {
+            s = s.slice(1);
+        }
+        if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
+            s = s.slice(1, -1);
+        }
+        s = s.trim();
+        if (s !== original) { console.log('[clean]', JSON.stringify(original), '→', JSON.stringify(s)); }
+        return s;
+    }
+
+    function parseNum(v) {
+        var n = parseInt(String(v == null ? '' : v).replace(/[^\d-]/g, ''), 10);
+        return isNaN(n) ? 0 : n;
+    }
+    function parseRate(v) {
+        if (v == null || v === '') return null;
+        var s = String(v).replace('%', '').trim().replace(',', '');
+        var n = parseFloat(s);
+        return isNaN(n) ? null : n;
+    }
+    // 区域汇总 CSV -> 中间数据，由调用方在匹配对象后再按该对象的 labels 拼装 status_detail
+    function parseAggregatedRows(headers, rows) {
+        rows = rows.map(function(row) { return row.map(cleanCell); });
+        var cArea = findCol(headers, ['所在区域', '区域', '位置']);
+        var cTotal = findCol(headers, ['监控点总数', '总数', '设备总数']);
+        var cOnline = findCol(headers, ['在线数', '在线']);
+        var cOffline = findCol(headers, ['离线数', '离线']);
+        var cUndetect = findCol(headers, ['未检测数', '未检测']);
+        var cWhite = findCol(headers, ['白名单数', '白名单']);
+        var cRate = findCol(headers, ['在线率']);
+        return rows.map(function(row) {
+            var area = (row[cArea] || '').trim();
+            if (!area) return null;
+            var total = parseNum(row[cTotal]);
+            var online = parseNum(row[cOnline]);
+            var offline = parseNum(row[cOffline]);
+            var undetected = cUndetect >= 0 ? parseNum(row[cUndetect]) : 0;
+            var whitelist = cWhite >= 0 ? parseNum(row[cWhite]) : 0;
+            var rate = parseRate(row[cRate]);
+            if (rate === null) rate = total > 0 ? +(online / total * 100).toFixed(2) : 0;
+            return { area: area, total: total, online: online, offline: offline, undetected: undetected, whitelist: whitelist, rate: rate };
+        }).filter(function(r) { return r; });
+    }
+
+    // 按对象的 dashboard labels 拼装 status_detail，未配置的字段不写入
+    function buildStatusDetail(d, allowedLabels) {
+        var labelMap = {
+            '监控点总数': d.total, '总数': d.total, '设备总数': d.total,
+            '在线': d.online, '在线数': d.online,
+            '离线': d.offline, '离线数': d.offline,
+            '未检测': d.undetected, '未检测数': d.undetected,
+            '白名单': d.whitelist, '白名单数': d.whitelist,
+            '在线率': d.rate.toFixed(2) + '%'
+        };
+        var parts = [];
+        for (var i = 0; i < allowedLabels.length; i++) {
+            var k = allowedLabels[i];
+            if (labelMap.hasOwnProperty(k)) parts.push(k + ': ' + labelMap[k]);
+        }
+        // 未检测/白名单在值为 0 时省略
+        return parts.filter(function(p) {
+            if (p.indexOf('未检测: 0') === 0) return false;
+            if (p.indexOf('白名单: 0') === 0) return false;
+            return true;
+        }).join('; ');
+    }
+
+    function buildAggregatedRecord(d, allowedLabels) {
+        var detail = buildStatusDetail(d, allowedLabels);
+        var result = d.rate < 90 ? '异常' : (d.rate < 100 ? '需关注' : '正常');
+        return {
+            point_name: d.area,
+            location: d.area,
+            timestamp: '',
+            result: result,
+            inspector_name: '',
+            status_detail: detail,
+            notes: ''
+        };
+    }
 
     function toRecords(parsed) {
+        console.log('[toRecords] input type:', parsed && parsed.type ? parsed.type : (Array.isArray(parsed) ? 'array:' + parsed.length : typeof parsed));
         if (parsed.length > 0 && typeof parsed[0] === 'object' && parsed[0].point_name !== undefined) {
             return parsed.filter(function(r) { return r.point_name; });
+        }
+        if (parsed && parsed.type === 'aggregated') {
+            // 返回原始中间数据，由调用方按匹配的 dashboard labels 拼装 status_detail
+            return { aggregated: parseAggregatedRows(parsed.headers, parsed.rows) };
         }
         // 新格式：带 headers 的对象
         if (parsed && parsed.headers && parsed.rows) {
             var h = parsed.headers;
-            var colMap = { point_name: -1, timestamp: -1, result: -1, inspector_name: -1, status_detail: -1, notes: -1 };
+            var colMap = { point_name: -1, timestamp: -1, result: -1, inspector_name: -1, status_detail: -1, notes: -1, location: -1 };
+            // 关键词按「具体 -> 宽泛」排序，避免「巡检时间」被「状态变更时间」抢走
             var keywords = {
-                point_name: ['位置', '点位', '对象', '名称'],
-                timestamp: ['时间', '日期', '巡检时间'],
-                result: ['结果', '状态', '巡检结果'],
-                inspector_name: ['人员', '巡检人', '巡检人员'],
-                status_detail: ['详情', '状态详情', '说明'],
-                notes: ['备注', '注']
+                point_name: ['监控点名称', '点位名称', '位置', '点位', '对象', '名称'],
+                location: ['所在区域', '区域', '位置', '所在地'],
+                timestamp: ['巡检时间', '采集时间', '统计时间', '日期', '时间'],
+                result: ['巡检结果', '在线状态', '结果', '状态'],
+                inspector_name: ['巡检人员', '巡检人', '人员'],
+                status_detail: ['离线原因', '状态详情', '详情', '说明', '原因'],
+                notes: ['备注', 'ip地址', 'ip', '注']
             };
             for (var field in keywords) {
                 for (var ki = 0; ki < keywords[field].length; ki++) {
@@ -276,14 +440,21 @@
             if (colMap.inspector_name === -1) colMap.inspector_name = 3;
             if (colMap.status_detail === -1) colMap.status_detail = 4;
             if (colMap.notes === -1) colMap.notes = 5;
-            return parsed.rows.map(function(row) {
+            return parsed.rows.map(function(rawRow) {
+                var row = rawRow.map(cleanCell);
+                var status_detail = row[colMap.status_detail] || '';
+                var ip = row[colMap.notes] || '';
+                // 智慧城管格式：离线原因为空且在线时，用 IP 补充状态详情
+                var detail = status_detail;
+                if (!detail && ip) detail = 'IP: ' + ip;
                 return {
                     point_name: row[colMap.point_name] || '',
+                    location: row[colMap.location] || '',
                     timestamp: row[colMap.timestamp] || '',
-                    result: row[colMap.result] || '正常',
+                    result: mapResult(row[colMap.result]),
                     inspector_name: row[colMap.inspector_name] || '',
-                    status_detail: row[colMap.status_detail] || '',
-                    notes: row[colMap.notes] || ''
+                    status_detail: detail,
+                    notes: status_detail ? (ip ? 'IP: ' + ip : '') : ''
                 };
             }).filter(function(r) { return r.point_name; });
         }
@@ -295,163 +466,144 @@
 
     function showPreview() {
         var text = recordsText.value;
-        if (!text.trim()) { previewArea.style.display = 'none'; cachedRecords = []; return; }
+        if (!text.trim()) { previewArea.style.display = 'none'; cachedRecords = []; resetImportUI(); return; }
         var parsed = parseData(text);
-        cachedRecords = toRecords(parsed);
-        if (cachedRecords.length === 0) { previewArea.style.display = 'none'; return; }
-        previewCount.textContent = cachedRecords.length;
+        var allRecords = toRecords(parsed);
+        console.log('[showPreview] records:', allRecords.length);
+        if (allRecords.length === 0) { previewArea.style.display = 'none'; resetImportUI(); return; }
+        // 文件上传仅做快速预览（不做区域匹配），导入按钮保持禁用，等用户点「识别」完成匹配后再启用
+        cachedRecords = allRecords;
+        cachedSkipped = [];
+        previewCount.textContent = allRecords.length + '（点击识别以匹配已有区域）';
         var html = '';
         var resultColors = { '正常': 'success', '异常': 'danger', '需关注': 'warning' };
-        for (var i = 0; i < cachedRecords.length; i++) {
-            var r = cachedRecords[i];
+        for (var i = 0; i < allRecords.length; i++) {
+            var r = allRecords[i];
             var cls = resultColors[r.result] || 'secondary';
             html += '<tr><td>' + escHtml(r.point_name) + '</td><td>' + escHtml(r.timestamp) + '</td><td><span class="badge bg-' + cls + '">' + escHtml(r.result) + '</span></td><td>' + escHtml(r.inspector_name) + '</td><td>' + escHtml(r.status_detail) + '</td></tr>';
         }
         previewBody.innerHTML = html;
         previewArea.style.display = 'block';
+        btnParseRecords.textContent = '识别';
+        btnImportRecords.disabled = true;
+        importStatus.innerHTML = '';
     }
 
-    document.getElementById('btn-parse-records').addEventListener('click', function() {
-        var status = document.getElementById('records-status');
+    function resetImportUI() {
+        btnParseRecords.textContent = '识别';
+        btnParseRecords.disabled = false;
+        btnImportRecords.disabled = true;
+        importStatus.innerHTML = '';
+        cachedSkipped = [];
+    }
+
+    btnParseRecords.addEventListener('click', function() {
         var text = recordsText.value;
-        if (!text.trim()) { status.innerHTML = '<span style="color:var(--danger);">请先粘贴数据或选择文件</span>'; return; }
+        if (!text.trim()) { recordsStatus.innerHTML = '<span style="color:var(--danger);">请先粘贴数据或选择文件</span>'; return; }
+        btnParseRecords.disabled = true;
+        btnParseRecords.textContent = '识别中...';
+        recordsStatus.innerHTML = '';
         var parsed = parseData(text);
-        cachedRecords = toRecords(parsed);
-        if (cachedRecords.length === 0) { status.innerHTML = '<span style="color:var(--danger);">未识别到有效数据</span>'; previewArea.style.display = 'none'; return; }
-        status.innerHTML = '<span style="color:var(--success);">识别完成</span>';
-        previewCount.textContent = cachedRecords.length;
-        var html = '';
-        var resultColors = { '正常': 'success', '异常': 'danger', '需关注': 'warning' };
-        for (var i = 0; i < cachedRecords.length; i++) {
-            var r = cachedRecords[i];
-            var cls = resultColors[r.result] || 'secondary';
-            html += '<tr><td>' + escHtml(r.point_name) + '</td><td>' + escHtml(r.timestamp) + '</td><td><span class="badge bg-' + cls + '">' + escHtml(r.result) + '</span></td><td>' + escHtml(r.inspector_name) + '</td><td>' + escHtml(r.status_detail) + '</td></tr>';
+        console.log('[识别按钮] parsed type:', parsed && parsed.type ? parsed.type : (Array.isArray(parsed) ? 'array:' + parsed.length : typeof parsed));
+
+        var isAggregated = parsed && parsed.type === 'aggregated';
+        var rawRows = isAggregated ? parseAggregatedRows(parsed.headers, parsed.rows) : null;
+        var otherRecords = isAggregated ? null : toRecords(parsed);
+        console.log('[识别按钮] raw rows:', isAggregated ? rawRows.length : 'n/a', 'other:', !isAggregated && Array.isArray(otherRecords) ? otherRecords.length : 'n/a');
+
+        if (isAggregated && rawRows.length === 0) {
+            recordsStatus.innerHTML = '<span style="color:var(--danger);">未识别到有效数据，请检查格式</span>';
+            previewArea.style.display = 'none';
+            resetImportUI();
+            btnParseRecords.disabled = false;
+            return;
         }
-        previewBody.innerHTML = html;
-        previewArea.style.display = 'block';
+        if (!isAggregated && (!Array.isArray(otherRecords) || otherRecords.length === 0)) {
+            recordsStatus.innerHTML = '<span style="color:var(--danger);">未识别到有效数据，请检查格式</span>';
+            previewArea.style.display = 'none';
+            resetImportUI();
+            btnParseRecords.disabled = false;
+            return;
+        }
+
+        // 并行拉取已有对象 + dashboard types labels
+        Promise.all([
+            fetch('/api/objects/list').then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; }),
+            fetch('/api/dashboard-types/labels').then(function(r){ return r.ok ? r.json() : {}; }).catch(function(){ return {}; })
+        ]).then(function(results) {
+            var objects = results[0];
+            var labelsByCategory = results[1];
+
+            if (isAggregated) {
+                // 按区域匹配，对命中行按对象的 dashboard labels 拼装 status_detail
+                var matchResult = matchAggregatedRows(rawRows, objects, labelsByCategory);
+                cachedRecords = matchResult.matched;
+                cachedSkipped = matchResult.skipped;
+            } else {
+                cachedRecords = otherRecords;
+                cachedSkipped = [];
+            }
+            console.log('[识别按钮] 匹配:', cachedRecords.length, '跳过:', cachedSkipped.length);
+
+            if (cachedRecords.length === 0) {
+                recordsStatus.innerHTML = '<span style="color:var(--danger);">所有区域均未匹配已有巡检对象，导入已跳过</span>';
+                previewArea.style.display = 'none';
+                btnParseRecords.disabled = false;
+                btnParseRecords.textContent = '识别';
+                return;
+            }
+
+            recordsStatus.innerHTML = '<span style="color:var(--success);">识别完成</span>';
+            console.log('[识别按钮] ✅ 区域:', cachedRecords.map(function(r){return r.point_name;}).join(', '));
+            if (cachedSkipped.length) console.log('[识别按钮] ⏭ 跳过:', cachedSkipped.map(function(r){return r.point_name;}).join(', '));
+
+            previewCount.textContent = cachedRecords.length + (cachedSkipped.length ? ' (跳过 ' + cachedSkipped.length + ')' : '');
+            var html = '';
+            var resultColors = { '正常': 'success', '异常': 'danger', '需关注': 'warning' };
+            for (var i = 0; i < cachedRecords.length; i++) {
+                var r = cachedRecords[i];
+                var cls = resultColors[r.result] || 'secondary';
+                html += '<tr><td>' + escHtml(r.point_name) + '</td><td>' + escHtml(r.timestamp) + '</td><td><span class="badge bg-' + cls + '">' + escHtml(r.result) + '</span></td><td>' + escHtml(r.inspector_name) + '</td><td>' + escHtml(r.status_detail) + '</td></tr>';
+            }
+            for (var si = 0; si < cachedSkipped.length; si++) {
+                var s = cachedSkipped[si];
+                html += '<tr style="opacity:0.45;text-decoration:line-through"><td>' + escHtml(s.point_name) + '</td><td>' + escHtml(s.timestamp) + '</td><td colspan="3" style="color:var(--danger)">⏭ 无匹配对象，将跳过</td></tr>';
+            }
+            previewBody.innerHTML = html;
+            previewArea.style.display = 'block';
+            btnParseRecords.disabled = false;
+            btnParseRecords.textContent = '重新识别';
+            btnImportRecords.disabled = false;
+            importStatus.innerHTML = '';
+        });
     });
 
     document.getElementById('btn-clear-preview').addEventListener('click', function() {
         recordsText.value = '';
         previewArea.style.display = 'none';
         cachedRecords = [];
-        document.getElementById('records-status').innerHTML = '';
+        cachedSkipped = [];
+        recordsStatus.innerHTML = '';
+        resetImportUI();
     });
 
-    document.getElementById('btn-import-records').addEventListener('click', async function() {
-        var status = document.getElementById('import-status');
-        if (cachedRecords.length === 0) { status.innerHTML = '<span style="color:var(--danger);">请先识别数据</span>'; return; }
-        status.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
+    btnImportRecords.addEventListener('click', async function() {
+        console.log('[导入按钮] 开始导入', cachedRecords.length, '条，跳过', cachedSkipped.length, '条');
+        if (cachedRecords.length === 0) { importStatus.innerHTML = '<span style="color:var(--danger);">没有可导入的匹配区域</span>'; return; }
+        importStatus.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
         try {
             var resp = await fetch('/api/records/import', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({records: cachedRecords}) });
             var result = await resp.json();
             if (result.error) {
-                status.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
+                importStatus.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
             } else {
                 var msg = '成功导入 ' + result.imported + ' 条记录';
                 if (result.created > 0) msg += '，自动创建 ' + result.created + ' 个位置';
                 if (result.skipped > 0) msg += '，跳过 ' + result.skipped + ' 条';
-                status.innerHTML = '<span style="color:var(--success);">' + msg + '</span>';
+                if (cachedSkipped.length > 0) msg += '，CSV未匹配 ' + cachedSkipped.length + ' 区域';
+                importStatus.innerHTML = '<span style="color:var(--success);">' + msg + '</span>';
             }
-        } catch(e) { status.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>'; }
-    });
-
-    // ========== 群成员文本导入 ==========
-    const groupObjectSelect = document.getElementById('group-object-select');
-    const groupMembersText = document.getElementById('group-members-text');
-    const btnImportGroup = document.getElementById('btn-import-group');
-    const groupImportStatus = document.getElementById('group-import-status');
-    const groupPreview = document.getElementById('group-preview');
-    const groupPreviewCount = document.getElementById('group-preview-count');
-    const btnGroupConfirm = document.getElementById('btn-group-confirm');
-
-    // 加载巡检对象列表
-    async function loadGroupObjects() {
-        try {
-            const resp = await fetch('/api/objects/list');
-            const objects = await resp.json();
-            groupObjectSelect.innerHTML = '<option value="">请选择巡检对象</option>';
-            objects.forEach(obj => {
-                const opt = document.createElement('option');
-                opt.value = obj.id;
-                opt.textContent = `${obj.name} (${obj.location || ''})`;
-                groupObjectSelect.appendChild(opt);
-            });
-        } catch(e) {
-            groupObjectSelect.innerHTML = '<option value="">加载失败</option>';
-        }
-    }
-    loadGroupObjects();
-
-    // 解析成员列表
-    function parseGroupMembers(text) {
-        const lines = text.split('\n');
-        const items = [];
-        const builtinFilters = ['搜索群成员', '搜索', '添加', '全部', '群成员', '群聊', '成员'];
-        
-        lines.forEach(line => {
-            line = line.trim();
-            if (!line) return;
-            // 去掉序号前缀 [1] xxx
-            const m = line.match(/^\[\d+\]\s*(.+)$/);
-            const name = m ? m[1].trim() : line;
-            // 过滤
-            if (name.length < 2) return;
-            if (builtinFilters.some(kw => name.includes(kw))) return;
-            items.push(name);
-        });
-        // 去重
-        return [...new Set(items)];
-    }
-
-    // 预览
-    btnImportGroup.addEventListener('click', () => {
-        const text = groupMembersText.value.trim();
-        if (!text) {
-            groupImportStatus.innerHTML = '<span style="color:var(--danger);">请输入成员列表</span>';
-            return;
-        }
-        if (!groupObjectSelect.value) {
-            groupImportStatus.innerHTML = '<span style="color:var(--danger);">请选择巡检对象</span>';
-            return;
-        }
-        const items = parseGroupMembers(text);
-        if (items.length === 0) {
-            groupImportStatus.innerHTML = '<span style="color:var(--danger);">未解析到有效成员</span>';
-            return;
-        }
-        groupPreviewCount.textContent = items.length;
-        groupPreview.style.display = 'block';
-        groupImportStatus.innerHTML = '';
-    });
-
-    // 确认导入
-    btnGroupConfirm.addEventListener('click', async () => {
-        const text = groupMembersText.value.trim();
-        const objectId = groupObjectSelect.value;
-        const items = parseGroupMembers(text);
-        
-        btnGroupConfirm.disabled = true;
-        groupImportStatus.innerHTML = '<span style="color:var(--text-muted);">导入中...</span>';
-
-        try {
-            const resp = await fetch('/api/import-group-members', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ object_id: parseInt(objectId), items: items })
-            });
-            const result = await resp.json();
-            if (result.error) {
-                groupImportStatus.innerHTML = '<span style="color:var(--danger);">' + result.error + '</span>';
-            } else {
-                groupImportStatus.innerHTML = `<span style="color:var(--success);">成功导入 ${result.count} 个成员</span>`;
-                groupPreview.style.display = 'none';
-                groupMembersText.value = '';
-            }
-        } catch(e) {
-            groupImportStatus.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>';
-        }
-        btnGroupConfirm.disabled = false;
+        } catch(e) { importStatus.innerHTML = '<span style="color:var(--danger);">导入失败: ' + e.message + '</span>'; }
     });
 })();
 </script>

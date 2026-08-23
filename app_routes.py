@@ -2631,58 +2631,6 @@ def api_daily_list(object_id):
         session.close()
 
 
-@main.route('/api/import-group-members', methods=['POST'])
-def api_import_group_members():
-    """导入群成员文本到日列表"""
-    data = request.get_json()
-    if not data or 'object_id' not in data or 'items' not in data:
-        return jsonify({'error': '缺少参数'}), 400
-    
-    object_id = data['object_id']
-    items = data['items']
-    
-    if not items:
-        return jsonify({'error': '成员列表为空'}), 400
-    
-    session = SessionLocal()
-    try:
-        obj = session.query(InspectionObject).get(object_id)
-        if not obj:
-            return jsonify({'error': '巡检对象不存在'}), 400
-        
-        today = date.today()
-        unique_items = list(dict.fromkeys(items))  # 去重保持顺序
-        
-        # UPSERT
-        existing = session.query(DailyListRecord).filter_by(
-            object_id=object_id, date=today, content_type='list'
-        ).first()
-        
-        if existing:
-            existing.items = json.dumps(unique_items, ensure_ascii=False)
-            existing.count = len(unique_items)
-            existing.raw_count = len(items)
-        else:
-            record = DailyListRecord(
-                object_id=object_id,
-                date=today,
-                content_type='list',
-                items=json.dumps(unique_items, ensure_ascii=False),
-                count=len(unique_items),
-                raw_count=len(items)
-            )
-            session.add(record)
-        
-        session.commit()
-        logger.info(f'  IMPORT: 群成员导入 obj_id={object_id} count={len(unique_items)}')
-        return jsonify({'count': len(unique_items), 'object_id': object_id})
-    except Exception as e:
-        session.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
 @main.route('/inspectors')
 def inspectors():
     """巡检人员管理页面"""
@@ -2918,6 +2866,7 @@ def api_records_import():
 
         for item in records:
             object_name = item.get('point_name', '').strip() or item.get('object_name', '').strip()
+            location = item.get('location', '').strip()
             timestamp_str = item.get('timestamp', '').strip()
             result = item.get('result', '正常').strip()
             inspector_name = item.get('inspector_name', '').strip()
@@ -2928,13 +2877,15 @@ def api_records_import():
                 skipped += 1
                 continue
 
-            # 匹配巡检对象
+            # 匹配巡检对象（先按名称，再按位置）
             obj = _match_object(object_name, all_objects)
+            if not obj and location:
+                obj = _match_object_by_location(location, all_objects)
             if not obj:
                 # 自动创建新巡检对象
                 obj = InspectionObject(
                     name=object_name,
-                    location=object_name,
+                    location=location or object_name,
                     device_type='监控',
                     description=f'批量导入 - {status_detail or ""}',
                     status='active'
@@ -2951,16 +2902,17 @@ def api_records_import():
             if not inspector and all_inspectors:
                 inspector = all_inspectors[0]
 
-            # 解析时间
+            # 解析时间（支持秒、分、纯日期格式）
             timestamp = None
             if timestamp_str:
-                try:
-                    timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M')
-                except ValueError:
+                for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
                     try:
-                        timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d')
+                        timestamp = datetime.strptime(timestamp_str, fmt)
+                        break
                     except ValueError:
-                        timestamp = datetime.now()
+                        continue
+                if not timestamp:
+                    timestamp = datetime.now()
             else:
                 timestamp = datetime.now()
 
@@ -3140,6 +3092,24 @@ def api_ocr_config_save():
 def api_global_vars_get():
     """获取全局变量配置"""
     return jsonify(_load_global_vars())
+
+
+@main.route('/api/dashboard-types/labels', methods=['GET'])
+def api_dashboard_types_labels():
+    """按 device_type(category) 返回各类型配置的指标标签列表"""
+    try:
+        with open(DASHBOARD_TYPES_PATH, encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        return jsonify({})
+    types = data.get('types', []) if isinstance(data, dict) else data
+    result = {}
+    for t in types:
+        cat = t.get('category') or ''
+        labels = list((t.get('labels') or {}).keys())
+        if cat and labels:
+            result[cat] = labels
+    return jsonify(result)
 
 
 @main.route('/api/global-vars', methods=['POST'])
