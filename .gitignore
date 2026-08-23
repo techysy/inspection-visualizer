@@ -29,3 +29,4 @@ log/
 backup/
 server.pid
 *.pid
+/.qoder
