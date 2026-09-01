@@ -82,7 +82,21 @@ python app.py
 
 双击 `start.bat`，自动创建虚拟环境、安装依赖并启动。
 
-### 🖥️ 方式四：桌面托盘版（Electron，推荐给非技术用户）
+### 📦 方式四：npm CLI（托盘管理，推荐）
+
+像 10Router 一样全局安装，托盘管理服务：
+
+```bash
+npm i -g @techysy/inspection-visualizer
+iv          # 启动服务 + 托盘图标 + 自动打开浏览器
+```
+
+- 托盘菜单：打开巡检系统 / 重启服务 / 停止服务 / 开机自启开关 / 退出
+- 其他命令：`iv start | stop | restart | status | open`、`iv autostart on|off|status`
+- 首次启动自动创建 Python 运行时（`~/.inspection-visualizer/runtime`，要求系统装有 Python 3.8+；网络受限可 `iv start --proxy http://<代理>:<端口>`）
+- 数据目录与桌面版一致（`%APPDATA%\InspectionVisualizer`），两种发行形态不要同时运行
+
+### 🖥️ 方式五：桌面托盘版（Electron，推荐给非技术用户）
 
 系统托盘常驻图标管理服务，双击安装包即可使用，无需 Python 环境：
 

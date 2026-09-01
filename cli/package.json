@@ -1,0 +1,47 @@
+{
+  "name": "@techysy/inspection-visualizer",
+  "version": "1.0.0",
+  "description": "巡检数据可视化 CLI — 托盘管理的 OCR 巡检记录服务(Tray-managed inspection dashboard)",
+  "bin": {
+    "inspection-visualizer": "./cli.js",
+    "iv": "./cli.js"
+  },
+  "files": [
+    "cli.js",
+    "src",
+    "hooks",
+    "app",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build-cli.js",
+    "prepublishOnly": "npm run build",
+    "postinstall": "node hooks/postinstall.js || exit 0",
+    "pack:cli": "npm run build && npm pack --pack-destination ../..",
+    "publish:cli": "npm run build && npm publish --registry https://registry.npmjs.org"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "inspection",
+    "ocr",
+    "flask",
+    "tray",
+    "dashboard",
+    "hikvision"
+  ],
+  "license": "MIT",
+  "author": "techysy",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/techysy/inspection-visualizer.git",
+    "directory": "cli"
+  },
+  "comment_postinstall": "`|| exit 0` 是刻意的:该钩子只做环境检查与提示,失败不应中断整个 npm 安装(例如 Windows npm 对 WSL 路径运行时 cmd 无法 cd 到 UNC 目录会回退 C:\\Windows,此时 hooks/postinstall.js 根本找不到)。真正的运行时供给(venv + pip)在首次 `iv start` 时执行并可重试。",
+  "comment_systray": "Windows 托盘用 PowerShell NotifyIcon(零二进制依赖,杀软友好);macOS/Linux 的 systray2 不打进包里,由 hooks/postinstall.js 惰性装到 ~/.inspection-visualizer/runtime/node_modules,避免发布带未签名 Go 二进制触发杀软误报。"
+}

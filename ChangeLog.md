@@ -5,6 +5,7 @@
 ### ✨ 新增
 
 - **桌面托盘版**：新增 `desktop/` Electron 应用，托盘图标管理服务（打开界面 / 启动 / 停止 / 重启 / 开机自启 / 打开数据目录与日志 / 退出），`electron-builder` 打包 NSIS 安装包与便携版 exe，内嵌 Windows Embeddable Python 运行时，目标机器无需安装 Python
+- **npm CLI 发行版**：新增 `cli/`（[@techysy/inspection-visualizer](https://www.npmjs.com/package/@techysy/inspection-visualizer)），`npm i -g` 后以 `iv` 命令托盘管理服务；Windows 托盘用 PowerShell NotifyIcon（零二进制依赖），首次启动自动创建 Python venv 运行时（支持 `--proxy`），命令：`iv start/stop/restart/status/open/autostart`
 - **健康检查接口**：新增 `GET /api/health`（免鉴权），供托盘轮询服务就绪状态
 - **数据目录注入**：支持 `IV_DATA_DIR` 环境变量，桌面版将 SQLite 库、`global_vars.json`、`ocr_config.json`、`dashboard_types.json`、截图备份、日志统一落到 `%APPDATA%\InspectionVisualizer`，程序与数据分离；未设置时行为与原来完全一致
 - **首次密码落盘**：未配置 `APP_PASSWORD` 时，随机生成的默认密码同时写入数据目录 `initial_password.txt`，托盘气泡提醒（桌面版无控制台可打印）
