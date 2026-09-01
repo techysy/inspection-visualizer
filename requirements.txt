@@ -16,3 +16,6 @@ openpyxl>=3.1.0
 
 # Other
 python-dotenv==1.0.0
+
+# Production WSGI server (desktop/tray mode)
+waitress>=3.0.0

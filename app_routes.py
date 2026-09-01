@@ -13,8 +13,9 @@ from PIL import Image
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from models.inspection import SessionLocal, InspectionObject, InspectionRecord, Inspector, ObjectMetric, DailyListRecord
+from config import data_file, data_subdir
 
-log_dir = Path(__file__).parent / 'log'
+log_dir = data_subdir('log')
 log_dir.mkdir(exist_ok=True)
 log_file = log_dir / 'app.log'
 log_handler = logging.handlers.TimedRotatingFileHandler(
@@ -61,8 +62,9 @@ def get_image_creation_time(file_storage):
     return None
 logger = logging.getLogger(__name__)
 
-OCR_CONFIG_PATH = Path(__file__).parent / 'ocr_config.json'
-DASHBOARD_TYPES_PATH = Path(__file__).parent / 'dashboard_types.json'
+OCR_CONFIG_PATH = data_file('ocr_config.json')
+DASHBOARD_TYPES_PATH = data_file('dashboard_types.json')
+BACKUP_BASE = data_subdir('backup')
 
 _default_ocr_config = {
     "text_score": 0.5,
@@ -304,7 +306,7 @@ main = Blueprint('main', __name__)
 
 # ──────────────────────── 鉴权 ────────────────────────
 
-PUBLIC_ROUTES = {'login', 'api_login', 'api_auth_status', 'static'}
+PUBLIC_ROUTES = {'login', 'api_login', 'api_auth_status', 'static', 'api_health'}
 ADMIN_ROUTES = {'inspectors', 'inspector_add', 'inspector_edit', 'inspector_delete', 'ocr_admin', 'bulk_import', 'objects', 'object_add', 'object_edit', 'object_delete', 'object_clone', 'backup_gallery_page', 'api_backup_gallery', 'serve_backup_image'}
 
 def _check_request_auth():
@@ -436,6 +438,12 @@ def api_auth_status():
             'is_admin': session.get('is_admin', False),
         } if session.get('inspector_id') else None
     })
+
+
+@main.route('/api/health', methods=['GET'])
+def api_health():
+    """存活探针：供托盘/桌面版轮询服务是否就绪（无需鉴权）"""
+    return jsonify({'status': 'ok'})
 
 
 @main.route('/logout')
@@ -645,7 +653,7 @@ def _extract_location_from_lines(lines):
     return ''
 
 
-GLOBAL_VARS_PATH = Path(__file__).parent / 'global_vars.json'
+GLOBAL_VARS_PATH = data_file('global_vars.json')
 
 _default_global_vars = {
     'skip_words': [
@@ -3649,7 +3657,7 @@ def api_ocr_test():
 @main.route('/api/backup/gallery')
 def api_backup_gallery():
     """获取备份截图列表（按日期分组）"""
-    backup_base = Path(__file__).parent / 'backup'
+    backup_base = BACKUP_BASE
     if not backup_base.exists():
         return jsonify({'folders': []})
     folders = []
@@ -3674,7 +3682,7 @@ def api_backup_gallery():
 def serve_backup_image(folder, filename):
     """提供备份图片访问"""
     from flask import send_from_directory
-    backup_dir = Path(__file__).parent / 'backup' / folder
+    backup_dir = BACKUP_BASE / folder
     return send_from_directory(str(backup_dir), filename)
 
 
@@ -3688,7 +3696,7 @@ def backup_gallery_page():
 def api_backup_today_path():
     """获取今日备份文件夹绝对路径"""
     date_folder = datetime.now().strftime('%Y%m%d')
-    backup_dir = Path(__file__).parent / 'backup' / date_folder
+    backup_dir = BACKUP_BASE / date_folder
     backup_dir.mkdir(parents=True, exist_ok=True)
     return jsonify({'path': str(backup_dir.resolve())})
 
@@ -3711,7 +3719,7 @@ def api_backup_screenshot():
     img_bytes = base64.b64decode(image_data)
 
     # 保存到 backup/日期/ 文件夹
-    backup_dir = Path(__file__).parent / 'backup' / date_folder
+    backup_dir = BACKUP_BASE / date_folder
     backup_dir.mkdir(parents=True, exist_ok=True)
     file_path = backup_dir / filename
     file_path.write_bytes(img_bytes)
@@ -4084,7 +4092,7 @@ def api_save():
         try:
             import hashlib as _hl
             date_folder = datetime.now().strftime('%Y%m%d')
-            backup_dir = Path(__file__).parent / 'backup' / date_folder
+            backup_dir = BACKUP_BASE / date_folder
             backup_dir.mkdir(parents=True, exist_ok=True)
 
             img_hash = _hl.md5(_backup_img_bytes).hexdigest()

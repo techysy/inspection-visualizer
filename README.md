@@ -82,6 +82,34 @@ python app.py
 
 双击 `start.bat`，自动创建虚拟环境、安装依赖并启动。
 
+### 🖥️ 方式四：桌面托盘版（Electron，推荐给非技术用户）
+
+系统托盘常驻图标管理服务，双击安装包即可使用，无需 Python 环境：
+
+- 托盘菜单：打开巡检系统 / 启动 / 停止 / 重启服务 / 开机自启（勾选即生效，无需任务计划程序）/ 打开数据目录 / 打开日志 / 退出
+- 启动成功自动打开内嵌窗口，外链（项目网址跳转等）走系统默认浏览器；点窗口关闭只是最小化到托盘
+- 数据目录独立于程序：`%APPDATA%\InspectionVisualizer`（SQLite 库、`global_vars.json`、`ocr_config.json`、截图备份、日志、`initial_password.txt`），卸载/升级程序不影响数据
+- 未设置 `APP_PASSWORD` 时每次启动生成随机密码并写入数据目录 `initial_password.txt`，托盘会气泡提醒；在数据目录建 `.env` 写入 `APP_PASSWORD=你的密码` 可固定
+- 服务监听 `0.0.0.0:5001`（waitress 生产服务器），局域网设备可直接访问；端口被占用时自动检测并直接打开已有服务
+
+**开发运行**（使用仓库 venv 的 Python）：
+
+```powershell
+cd desktop
+npm install          # 首次，建议 $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+npm start
+```
+
+**打包**（产出 NSIS 安装包 + 便携版 exe）：
+
+```powershell
+cd desktop
+.\build.ps1 -Proxy http://<代理地址>:<端口>   # 首次需下载 Embeddable Python 与依赖，约 200MB
+# 产物在 desktop\dist\：InspectionVisualizer Setup x.x.x.exe / InspectionVisualizer-Portable-x.x.x.exe
+```
+
+> 打包脚本说明：`build-python-runtime.ps1` 构建 Windows Embeddable Python 运行时（含全部 pip 依赖，写入 `._pth` 使 `resources\python` 与 `resources\app` 同级布局可导入）；`build.ps1` 汇集应用源码并调用 electron-builder。打包时自动排除 `venv`、`integrations`、`film_price_tracker`、`.env`、`*.db`、日志与备份目录。
+
 ## ⚙️ 开机自启动
 
 ### 🪟 Windows
