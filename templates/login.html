@@ -62,6 +62,27 @@
             font-size: .82rem;
             margin-top: .5rem;
         }
+        .default-pw {
+            background: var(--primary-soft, rgba(108,92,231,.12));
+            border: 1px dashed var(--accent, #6c5ce7);
+            border-radius: 10px;
+            padding: .6rem .75rem;
+            font-size: .8rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            word-break: break-all;
+        }
+        .default-pw code {
+            color: var(--text);
+            font-weight: 700;
+            font-size: .95rem;
+            user-select: all;
+        }
+        .default-pw-sub {
+            margin-top: .25rem;
+            font-size: .72rem;
+            opacity: .75;
+        }
         .theme-toggle {
             position: fixed;
             top: 1rem;
@@ -82,6 +103,12 @@
         <div class="login-card">
             <h1>巡检数据可视化</h1>
             <p>使用运维人员账号登录</p>
+            {% if default_password %}
+            <div class="default-pw">
+                <div>首次使用:用户名<b>留空</b>,密码输入 <code>{{ default_password }}</code> 即可以管理员身份登录</div>
+                <div class="default-pw-sub">登录后在「人员管理」创建常用账号;在数据目录 .env 设置 APP_PASSWORD 后此提示消失</div>
+            </div>
+            {% endif %}
             <form id="login-form" onsubmit="return false;">
                 <div class="mb-3">
                     <label for="username" class="form-label">用户名</label>

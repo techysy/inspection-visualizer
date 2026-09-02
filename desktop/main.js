@@ -106,10 +106,11 @@ function setState(next) {
 async function startServer() {
     if (pyProc || state === 'running' || state === 'starting') return;
 
-    // 端口已被占用且健康 → 视为外部已有服务在跑(比如手动 start.bat 启动的)
+    // 端口已被占用且健康 → 视为外部已有服务在跑(比如手动 start.bat 启动的),直接打开界面
     if (await checkHealth()) {
         setState('external');
-        notify('端口已被占用', `${PORT} 端口已有巡检服务在运行(可能由脚本启动),托盘将直接打开界面`);
+        notify('端口已被占用', `${PORT} 端口已有巡检服务在运行(可能由脚本启动),将直接打开界面`);
+        createWindow();
         return;
     }
 
@@ -169,9 +170,12 @@ async function startServer() {
 }
 
 function killProcTree(pid) {
-    // Flask/waitress 可能有子进程,用 taskkill 杀整棵树
+    // Flask/waitress 可能有子进程,用 taskkill 杀整棵树;被拒绝(权限)时 WMI 兜底
     const r = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
     if (r.error) throw r.error;
+    if (r.status !== 0) {
+        spawnSync('wmic', ['process', 'where', `processid=${pid}`, 'delete'], { windowsHide: true });
+    }
 }
 
 function stopServer() {

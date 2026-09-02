@@ -24,7 +24,9 @@ const { initTray, killTray, updateItem, MENU_INDEX, isTraySupported } = require(
 const autostart = require("./src/tray/autostart");
 
 const VERSION = require("./package.json").version;
-const TRAY_PID_FILE = path.join(require("./src/server").HOME_DIR, "tray.pid");
+const HOME_DIR = require("./src/server").HOME_DIR;
+const TRAY_PID_FILE = path.join(HOME_DIR, "tray.pid");
+const QUIT_FLAG_FILE = path.join(HOME_DIR, "tray.quit");
 
 function argValue(flag) {
   const i = process.argv.indexOf(flag);
@@ -36,30 +38,59 @@ function alivePid(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-/** 托盘单实例:已在运行则直接打开浏览器退出 */
-function trayAlreadyRunning() {
-  let pid = 0;
-  try { pid = parseInt(fs.readFileSync(TRAY_PID_FILE, "utf8").trim(), 10); } catch { }
-  if (alivePid(pid)) {
-    openBrowser();
-    console.log(`[iv] 托盘已在运行 (PID ${pid}),已为你打开 ${BASE_URL}`);
-    return true;
-  }
-  try { fs.mkdirSync(require("./src/server").HOME_DIR, { recursive: true }); } catch { }
-  fs.writeFileSync(TRAY_PID_FILE, String(process.pid));
-  return false;
+/** 读取仍存活的后台托盘 pid(无则 0) */
+function readTrayPid() {
+  try {
+    const pid = parseInt(fs.readFileSync(TRAY_PID_FILE, "utf8").trim(), 10);
+    return alivePid(pid) ? pid : 0;
+  } catch { return 0; }
 }
 
 async function trayMode() {
-  if (trayAlreadyRunning()) return;
+  // `iv` 默认:托盘拉起为 detached 后台进程,关闭终端/控制台不影响;--tray 为后台 worker 入口
+  if (!process.argv.includes("--tray")) {
+    const existing = readTrayPid();
+    if (existing) {
+      openBrowser();
+      console.log(`[iv] 托盘已在运行 (PID ${existing}),已为你打开 ${BASE_URL}`);
+      return;
+    }
+    const { spawn } = require("child_process");
+    const child = spawn(process.execPath, [__filename, "--tray"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+    // 最多等 10s 让 worker 写入它自己的 tray.pid
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const pid = readTrayPid();
+      if (pid && pid !== process.pid) {
+        openBrowser();
+        console.log(`[iv] 托盘已在后台启动 (PID ${pid}),浏览器将自动打开`);
+        console.log(`[iv] iv status 查看状态 | iv stop 停止服务 | iv quit 退出托盘并停止服务`);
+        return;
+      }
+    }
+    console.error("[iv] 托盘启动失败,可前台运行排查: iv --tray");
+    process.exit(1);
+  }
+
+  // ── 后台 worker(--tray)──
+  const running = readTrayPid();
+  if (running) {
+    console.log(`[iv] 托盘已在运行 (PID ${running}),本实例退出`);
+    return;
+  }
+  fs.mkdirSync(HOME_DIR, { recursive: true });
+  fs.writeFileSync(TRAY_PID_FILE, String(process.pid));
   console.log(`[iv] 巡检数据可视化 v${VERSION} — 启动中...`);
 
-  let startedHere = false;
   const status = await getStatus();
   if (!status.healthy) {
     try {
-      const r = await startServer({ proxy: argValue("--proxy") });
-      startedHere = !r.already;
+      await startServer({ proxy: argValue("--proxy") });
     } catch (e) {
       console.error(`[iv] ${e.message}`);
       if (!isTraySupported()) process.exit(1);
@@ -68,7 +99,6 @@ async function trayMode() {
   } else {
     console.log(`[iv] 服务已在运行: ${BASE_URL}`);
   }
-  openBrowser();
 
   const tray = initTray({
     port: PORT,
@@ -101,12 +131,28 @@ async function trayMode() {
       ok ? `巡检服务 · 运行中 :${PORT}` : "巡检服务 · 未运行", false);
   }, 5000);
 
+  // 优雅退出:iv quit 写入退出标记,worker 轮询到后停服务并收托盘
+  const gracefulShutdown = async () => {
+    try { await stopServer({ log: () => { } }); } catch { }
+    killTray();
+    try { fs.unlinkSync(TRAY_PID_FILE); } catch { }
+    setTimeout(() => process.exit(0), 500);
+  };
+  const quitWatcher = setInterval(() => {
+    try {
+      if (fs.existsSync(QUIT_FLAG_FILE)) {
+        fs.unlinkSync(QUIT_FLAG_FILE);
+        gracefulShutdown();
+      }
+    } catch { }
+  }, 1500);
+
   const cleanup = async () => {
     try { fs.unlinkSync(TRAY_PID_FILE); } catch { }
   };
   process.on("SIGINT", async () => { await cleanup(); process.exit(0); });
   process.on("exit", () => { try { fs.unlinkSync(TRAY_PID_FILE); } catch { } });
-  console.log(`[iv] 托盘已就绪,浏览器访问 ${BASE_URL}(Ctrl+C 退出,不影响后台服务)`);
+  console.log(`[iv] 托盘已就绪(后台常驻,关闭终端不影响),浏览器访问 ${BASE_URL}`);
 }
 
 /** 无托盘环境下保持进程存活(仅轮询) */
@@ -123,10 +169,11 @@ function printHelp() {
 巡检数据可视化 CLI v${VERSION}
 
 用法:
-  iv                        启动服务并进入托盘管理(默认)
-  iv start [--proxy URL]    后台启动服务(首次自动创建 Python 运行时)
-  iv stop                   停止服务
+  iv                        后台启动服务与托盘(关闭终端不影响)
+  iv start [--proxy URL]    后台启动服务,不进托盘(首次自动创建 Python 运行时)
+  iv stop                   停止服务(托盘保留,可从托盘重新启动)
   iv restart                重启服务
+  iv quit                   退出托盘并停止服务
   iv status                 查看服务状态
   iv open                   浏览器打开巡检系统
   iv autostart on|off|status  开机自启管理
@@ -204,6 +251,26 @@ async function main() {
       }
       openBrowser();
       console.log(`[iv] 已在浏览器打开 ${BASE_URL}`);
+      return;
+    }
+    case "quit": {
+      // 退出后台托盘(写退出标记,worker 优雅收尾)并停止服务
+      let pid = 0;
+      try { pid = parseInt(fs.readFileSync(TRAY_PID_FILE, "utf8").trim(), 10); } catch { }
+      if (alivePid(pid)) {
+        fs.mkdirSync(HOME_DIR, { recursive: true });
+        fs.writeFileSync(QUIT_FLAG_FILE, String(Date.now()));
+        for (let i = 0; i < 20 && alivePid(pid); i++) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (alivePid(pid)) { try { process.kill(pid); } catch { } }
+        console.log(`[iv] 托盘已退出 (PID ${pid})`);
+      } else {
+        console.log("[iv] 托盘未在运行");
+      }
+      try { fs.unlinkSync(QUIT_FLAG_FILE); } catch { }
+      const r = await stopServer();
+      console.log(r.stopped ? "[iv] 服务已停止" : `[iv] ${r.reason}`);
       return;
     }
     case "autostart": {

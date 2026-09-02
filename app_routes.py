@@ -7,7 +7,7 @@ import logging.handlers
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import json
-from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response, send_file, session
+from flask import Blueprint, render_template, jsonify, request, redirect, url_for, flash, Response, send_file, session, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image
 from openpyxl import Workbook
@@ -379,7 +379,9 @@ def login():
     """登录页面"""
     if session.get('logged_in'):
         return redirect(url_for('main.index'))
-    return render_template('login.html')
+    # 未配置 APP_PASSWORD 时,把本次启动生成的默认密码显示在登录页(配置后自动消失)
+    default_pw = current_app.config.get('APP_PASSWORD') if current_app.config.get('APP_PASSWORD_IS_DEFAULT') else None
+    return render_template('login.html', default_password=default_pw)
 
 
 @main.route('/api/login', methods=['POST'])

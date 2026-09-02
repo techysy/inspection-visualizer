@@ -79,6 +79,8 @@ class Config:
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{_db_path}"
     SECRET_KEY = os.environ.get('SECRET_KEY', secrets.token_hex(32))
     APP_PASSWORD = _resolve_app_password()
+    # 未在 .env/环境变量配置 APP_PASSWORD 时为 True(登录页据此显示默认密码提示)
+    APP_PASSWORD_IS_DEFAULT = not os.environ.get('APP_PASSWORD')
     DEBUG = False
     SCRAPER_CWD = str(BASE_DIR)
 

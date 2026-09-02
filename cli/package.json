@@ -1,6 +1,6 @@
 {
   "name": "@techysy/inspection-visualizer",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "巡检数据可视化 CLI — 托盘管理的 OCR 巡检记录服务(Tray-managed inspection dashboard)",
   "bin": {
     "inspection-visualizer": "./cli.js",

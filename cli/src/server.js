@@ -240,7 +240,18 @@ async function stopServer({ log = console.log } = {}) {
     try { fs.unlinkSync(pidFile()); } catch { }
     const deadline = Date.now() + 8000;
     while (await isHealthy(800) && Date.now() < deadline) {
+        killPid(pid);           // 重试
         await new Promise(r => setTimeout(r, 500));
+    }
+    if (await isHealthy(800)) {
+        // taskkill 被拒绝(权限)时用 WMI 兜底
+        try {
+            spawnSync('wmic', ['process', 'where', `processid=${pid}`, 'delete'], { windowsHide: true });
+        } catch { }
+        await new Promise(r => setTimeout(r, 1200));
+    }
+    if (await isHealthy(800)) {
+        return { stopped: false, reason: `进程 ${pid} 无法终止(权限不足),请手动结束该 Python 进程` };
     }
     return { stopped: true, pid };
 }

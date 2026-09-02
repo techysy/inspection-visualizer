@@ -91,9 +91,10 @@ npm i -g @techysy/inspection-visualizer
 iv          # 启动服务 + 托盘图标 + 自动打开浏览器
 ```
 
-- 托盘菜单：打开巡检系统 / 重启服务 / 停止服务 / 开机自启开关 / 退出
-- 其他命令：`iv start | stop | restart | status | open`、`iv autostart on|off|status`
-- 首次启动自动创建 Python 运行时（`~/.inspection-visualizer/runtime`，要求系统装有 Python 3.8+；网络受限可 `iv start --proxy http://<代理>:<端口>`）
+- 托盘菜单:打开巡检系统 / 重启服务 / 停止服务 / 开机自启开关 / 退出
+- 其他命令:`iv start | stop | restart | status | open | quit`、`iv autostart on|off|status`(`iv` 启动的托盘为后台常驻,关闭终端不影响;`iv quit` 退出托盘并停止服务)
+- 首次登录:登录页会提示初始方式(用户名留空 + 生成的默认密码),登录后在「人员管理」创建常用账号
+- 首次启动自动创建 Python 运行时(`~/.inspection-visualizer/runtime`,要求系统装有 Python 3.8+;网络受限可 `iv start --proxy http://<代理>:<端口>`)
 - 数据目录与桌面版一致（`%APPDATA%\InspectionVisualizer`），两种发行形态不要同时运行
 
 ### 🖥️ 方式五：桌面托盘版（Electron，推荐给非技术用户）
