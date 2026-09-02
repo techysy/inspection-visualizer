@@ -123,7 +123,9 @@ cd desktop
 # 产物在 desktop\dist\：InspectionVisualizer Setup x.x.x.exe / InspectionVisualizer-Portable-x.x.x.exe
 ```
 
-> 打包脚本说明：`build-python-runtime.ps1` 构建 Windows Embeddable Python 运行时（含全部 pip 依赖，写入 `._pth` 使 `resources\python` 与 `resources\app` 同级布局可导入）；`build.ps1` 汇集应用源码并调用 electron-builder。打包时自动排除 `venv`、`integrations`、`film_price_tracker`、`.env`、`*.db`、日志与备份目录。
+> 打包脚本说明:`build-python-runtime.ps1` 构建 Windows Embeddable Python 运行时(含全部 pip 依赖,写入 `._pth` 使 `resources\python` 与 `resources\app` 同级布局可导入);`build.ps1` 汇集应用源码并调用 electron-builder。打包时自动排除 `venv`、`integrations`、`film_price_tracker`、`.env`、`*.db`、日志与备份目录。
+>
+> 📐 **打包原理、mac dmg / Linux AppImage 构建、以及复用到其他项目的完整指南见 [docs/桌面托盘应用打包指南.md](docs/桌面托盘应用打包指南.md)**。
 
 ## ⚙️ 开机自启动
 
